@@ -1,0 +1,55 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Data (never commit large files)
+data/raw/
+data/processed/
+data/datasets/
+data/models/
+data/logs/
+*.csv
+*.parquet
+*.pkl
+*.joblib
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Project Specific
+notebooks/.ipynb_checkpoints/
+*.ipynb
+logs/
+test-results/
+
+# OS
+.DS_Store
+Thumbs.db
+*.bak
+
+# Jupyter Notebook
+notebooks/*
+
+# Copilot Customization
+.claude
