@@ -1,6 +1,6 @@
 import numpy as np
 
-def bollinger_bands(closes, period, dev):
+def BollingerBands(closes, period, dev):
     ma = np.mean(closes[-period:])
     std = np.std(closes[-period:])
     upper = ma + dev * std
@@ -8,7 +8,7 @@ def bollinger_bands(closes, period, dev):
     return upper, lower, ma
 
 
-def atr(highs, lows, closes, period=20):
+def ATR(highs, lows, closes, period=20):
     trs = []
     for i in range(1, len(closes)):
         tr = max(

@@ -3,13 +3,13 @@ from typing import Optional
 
 from src.core.types import Signal, Direction, MarketState
 from src.strategies.bb_squeeze.config import BBSqueezeConfig
+from src.strategies.base import Strategy
+from src.indicators.volatility import BollingerBands, ATR
 
-from src.indicators.volatility import bollinger_bands, atr
-
-class BBSqueezeStrategy:
+class BBSqueezeStrategy(Strategy):
     def __init__(self,config: BBSqueezeConfig):
         self.config = config
-        self.strategy_id = "bb_squeeze"
+        self.strategy_id = self.__class__.__name__
 
         # adaptive state
         self.last_trade_was_loss = False
@@ -19,7 +19,7 @@ class BBSqueezeStrategy:
     # Derived indicators
     # -----------------------------
     def bandwidth(self, closes):
-        upper, lower, middle = bollinger_bands(
+        upper, lower, middle = BollingerBands(
             closes,
             self.config.bb_period,
             self.config.bb_dev
@@ -71,7 +71,7 @@ class BBSqueezeStrategy:
         low1 = lows[-2]
 
         # BB
-        upper1, lower1, _ = bollinger_bands(
+        upper1, lower1, _ = BollingerBands(
             closes[:-1],
             self.config.bb_period,
             self.config.bb_dev
@@ -82,10 +82,11 @@ class BBSqueezeStrategy:
         bw_ma1 = self.bandwidth_ma(closes[:-1])
 
         if bw1 >= self.config.constant * bw_ma1:
+            print("[FILTER] bandwidth condition failed")
             return None
 
         # ATR
-        atr_value = atr(highs, lows, closes)
+        atr_value = ATR(highs, lows, closes)
 
         # adaptive filter (only after loss)
         if self.last_trade_was_loss:
@@ -134,7 +135,7 @@ class BBSqueezeStrategy:
     # Exit logic (returns True/False)
     # -----------------------------
     def check_exit(self, trade, market_state, closes):
-        upper, lower, _ = bollinger_bands(
+        upper, lower, _ = BollingerBands(
             closes,
             self.config.bb_period,
             self.config.bb_dev

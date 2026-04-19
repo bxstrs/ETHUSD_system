@@ -72,18 +72,19 @@ class Trade:
     """A completed or open trade."""
     # Identifiers
     trade_id: str
-    signal_id: str
-    strategy_id: str
     symbol: str
 
     # Order details
     direction: Direction
     entry_price: float # Filled entry price (slippage included).
     entry_time: datetime
-    size: float
-    stop_loss: float
-    take_profit: float
-    status: TradeStatus
+    volume: float
+    status: Optional[TradeStatus] = None
+
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    signal_id: Optional[str] = None
+    strategy_id: Optional[str] = None
     exit_price: Optional[float] = None
     exit_time: Optional[datetime] = None
 
@@ -95,7 +96,7 @@ class Trade:
 
     def __post_init__(self):
         """Validate trade."""
-        if self.size <= 0:
+        if self.volume <= 0:
             raise ValueError("Size must be positive")
         if self.status == TradeStatus.CLOSED:
             if self.exit_price is None or self.exit_time is None:
