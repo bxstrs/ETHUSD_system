@@ -1,3 +1,6 @@
+'''src/indicators/legacy/volatility.py'''
+
+## OUTDATED - UPDATE TO USE incremental for both live and backtesting for consistency
 import numpy as np
 
 def BollingerBands(closes, period, dev):

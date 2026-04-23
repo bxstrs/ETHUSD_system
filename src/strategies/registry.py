@@ -1,3 +1,4 @@
+'''src/strategies/registry.py'''
 from src.strategies.bb_squeeze.signal import BBSqueezeStrategy
 from src.strategies.bb_squeeze.config import BBSqueezeConfig
 

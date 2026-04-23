@@ -1,121 +1,44 @@
+'''src/engine/forward.py'''
 import time
 import MetaTrader5 as mt5
+
 from src.core.types import MarketState
 from src.strategies.strategy_loader import load_strategy
 from src.execution.mt5_bridge import MT5Bridge
-from src.execution.converter import convert_position_to_trade
 from src.utils.logger import log
+from src.execution.position_manager import PositionManager
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
-symbol = "ETHUSD#"
-timeframe = mt5.TIMEFRAME_M1
-str_timeframe = "1m"
+SYMBOL = "ETHUSD#"
+TIMEFRAME = mt5.TIMEFRAME_M1
+STR_TIMEFRAME = "1m"
 
-# Performance tuning
 TICK_SLEEP = 0.1  # seconds (100ms = ~10 ticks/sec)
 RATE_FETCH_INTERVAL = 1  # fetch full history every N ticks (reduce redundant calls)
 
-# State
-last_entry_bar_time = None
-tick_counter = 0
+# ============================================================================
+# Helpers
+# ============================================================================
 
-def fetch_and_prepare_data(bridge):
+def fetch_data(bridge):
+    history = bridge.get_rates(SYMBOL, TIMEFRAME, 120)
+    tick = bridge.get_tick(SYMBOL)
 
-    # Fetch market data and prepare for analysis.
-    history = bridge.get_rates(symbol, timeframe, 180)
-    tick = bridge.get_tick(symbol)
-    
     if history is None or tick is None:
-        return None, None, None
-    
-    return history, tick, history["close"]
+        return None, None
 
-
-def has_open_position(bridge, strategy):
-    # Check an open position for this strategy/symbol.
-    positions = bridge.get_positions(symbol)
-    return len(positions) > 0 if positions else False
-
-
-def execute_exit_logic(bridge, strategy, market_state, closes):
-    
-    #Exit any open positions per conditions and current CANDLE
-    positions = bridge.get_positions(symbol)
-    
-    if not positions:
-        return
-    
-    for pos in positions:
-        trade = convert_position_to_trade(pos)
-        
-        # Check if we should exit
-        if strategy.check_exit(trade, market_state, closes):
-            log(f"[EXIT SIGNAL] {trade.direction} at {market_state.bid if trade.direction.name == 'LONG' else market_state.ask}", level="SIGNAL")
-            bridge.close_position(pos)
-            
-            # Update strategy state with trade result
-            trade.exit_price = pos.price_current
-            trade.exit_time = market_state.timestamp
-            trade.net_pnl = pos.profit
-            strategy.update_trade_result(trade)
-
-
-def execute_entry_logic(bridge, strategy, market_state, history, spread, current_bar_time):
-    """
-    Checks PREVIOUS/CLOSED candle (shift=1) for conditions.
-    Executes at CURRENT tick prices.
-    """
-    global last_entry_bar_time
-    
-    # Prevent re-entry on same closed candle
-    # (last_close_time from strategy tracks when we last exited)
-    if last_entry_bar_time == current_bar_time:
-        return False
-    
-    # Prevent duplicate positions
-    if has_open_position(bridge, strategy):
-        return False
-    
-    # Generate signal (checks closed candle conditions)
-    signal = strategy.generate_signal(
-        market_state=market_state,
-        history=history,
-        spread=spread
-    )
-    
-    if not signal:
-        return False
-    
-    current_price = market_state.bid if signal.direction.name == "LONG" else market_state.ask
-    
-    if signal.direction.name == "LONG" and current_price <= signal.entry_price:
-        return False
-    if signal.direction.name == "SHORT" and current_price >= signal.entry_price:
-        return False
-    
-    # Execute order at current market prices
-    direction = "BUY" if signal.direction.name == "LONG" else "SELL"
-    log(f"[ENTRY SIGNAL] {signal.direction} at {signal.entry_price}: {signal.notes}", level="SIGNAL")
-    
-    result = bridge.send_order(symbol, direction, volume=0.1)
-    
-    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-        last_entry_bar_time = current_bar_time
-        return True
-    
-    return False
+    return history, tick
 
 
 def build_market_state(history, tick, use_previous=False):
-    #Build MarketState from history and tick data.
     idx = -2 if use_previous else -1
-    
+
     return MarketState(
-        symbol=symbol,
-        interval=str_timeframe,
+        symbol=SYMBOL,
+        interval=STR_TIMEFRAME,
         timestamp=history["timestamp"][idx],
         open=history["open"][idx],
         high=history["high"][idx],
@@ -125,97 +48,171 @@ def build_market_state(history, tick, use_previous=False):
         ask=tick.ask
     )
 
+def warmup_strategy(strategy, history):
+    closes = history["close"]
+    highs = history["high"]
+    lows = history["low"]
 
-# ============================================================================
-# Main Loop
-# ============================================================================
+    for i in range(1, len(closes)):
+        sub_history = {
+            "close": closes[:i+1],
+            "high": highs[:i+1],
+            "low": lows[:i+1],
+            "open": history["open"][:i+1],
+            "timestamp": history["timestamp"][:i+1],
+        }
 
+        strategy.on_new_bar(sub_history)
+
+# =========================
+# Entry Logic
+# =========================
+def try_entry(
+    bridge,
+    position_manager,
+    strategy,
+    market_state,
+    history,
+    spread,
+    current_bar_time,
+    last_entry_bar_time
+):
+
+    # prevent same bar entry
+    if last_entry_bar_time == current_bar_time:
+        return False, last_entry_bar_time
+
+    # enforce position rule
+    if position_manager.has_open_position(SYMBOL, strategy.strategy_id):
+        return False, last_entry_bar_time
+
+    signal = strategy.generate_signal(
+        market_state=market_state,
+        history=history,
+        spread=spread
+    )
+
+    if not signal:
+        return False, last_entry_bar_time
+
+    direction = "BUY" if signal.direction.name == "LONG" else "SELL"
+
+    log(f"[ENTRY] {signal.direction} at expected price: {signal.entry_price}", level="SIGNAL")
+
+    result = bridge.send_order(
+        symbol=SYMBOL,
+        direction=direction,
+        volume=0.1,
+        magic=strategy.magic_number,
+        comment=strategy.strategy_id
+    )
+
+    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+        return True, current_bar_time
+
+    return False, last_entry_bar_time
+
+
+# =========================
+# MAIN LOOP
+# =========================
 def main():
-    """Main forward testing loop."""
-    global tick_counter, last_entry_bar_time
     
-    # Initialize
     bridge = MT5Bridge()
     if not bridge.connect():
-        log("Failed to connect to MT5")
+        log("MT5 connection failed")
         return
-    
+
     strategy = load_strategy("bb_squeeze")
+    position_manager = PositionManager(bridge)
+
     log(f"Loaded strategy: {strategy.strategy_id}")
+
+    history, tick = fetch_data(bridge)
+    if history is None:
+        log("Initial data fetch failed")
+        return
+
+    warmup_strategy(strategy, history)
+    log("Strategy warmed up and ready")
     
-    last_rate_fetch_time = time.time()
+    #Loop state
+    tick_counter = 0
+    last_entry_bar_time = None
+    current_bar_time = history["timestamp"][-1]
+    last_fetch_time = time.time()
     loop_start = time.time()
 
-    # =========================
-    # INITIALIZE BEFORE LOOP
-    # =========================
-    history, tick, closes = fetch_and_prepare_data(bridge)
-
-    if history is None:
-        log("Failed initial data fetch")
-        return
-
-    current_bar_time = history["timestamp"][-1]
-    # =========================
-    
     try:
         while True:
             tick_counter += 1
             loop_iteration_start = time.time()
-            
-            # Periodically refresh full history (reduce API calls)
-            if time.time() - last_rate_fetch_time > RATE_FETCH_INTERVAL:
-                history, tick, closes = fetch_and_prepare_data(bridge)
-                
-                if history is None:
+
+            # refresh history periodically
+            if time.time() - last_fetch_time > RATE_FETCH_INTERVAL:
+                history, tick = fetch_data(bridge)
+
+                if history is None or tick is None:
                     log("Failed to fetch market data, retrying...")
                     time.sleep(TICK_SLEEP)
                     continue
-                
-                last_rate_fetch_time = time.time()
+
                 current_bar_time = history["timestamp"][-1]
-                
+                last_fetch_time = time.time()
+
                 if tick_counter % 100 == 0:
                     log(f"[TICK {tick_counter}] Bar time: {current_bar_time}, "
                         f"Bid: {tick.bid:.5f}, Ask: {tick.ask:.5f}",
                         level="INFO") # Bid, Ask will be fetched from tick data.
             else:
-                # Quick tick fetch (just prices, not full history)
-                tick = bridge.get_tick(symbol)
+                tick = bridge.get_tick(SYMBOL)
                 if tick is None:
                     log(f"[TICK {tick_counter}] Failed to fetch tick data", level="ERROR")
                     time.sleep(TICK_SLEEP)
                     continue
                 if tick_counter % 100 == 0:
                     log(f"[TICK {tick_counter}] Bid: {tick.bid:.5f}, Ask: {tick.ask:.5f}", level="INFO")
+
+            # =========================
+            # GLOBAL DATA GUARD (REQUIRED)
+            # =========================
+            if history is None:
+                log("[DATA ERROR] history is None, skipping iteration", level="ERROR")
+                time.sleep(TICK_SLEEP)
+                continue
+
+            # =========================
+            # EXIT (current candle)
+            # =========================
+            current_state = build_market_state(history, tick, use_previous=False)
+            position_manager.handle_exit(strategy, current_state, history)
             
-            # Exit logic (check current candle)
-            current_market_state = build_market_state(history, tick, use_previous=False)
-            execute_exit_logic(bridge, strategy, current_market_state, closes)
-            
-            # Entry logic (check previous/closed candle)
-            previous_market_state = build_market_state(history, tick, use_previous=True)
-            spread = bridge.get_spread(symbol)
-            
-            signal_executed = execute_entry_logic(
+
+            # =========================
+            # ENTRY (previous candle)
+            # =========================
+            prev_state = build_market_state(history, tick, True)
+            spread = bridge.get_spread(SYMBOL)
+
+            execute, last_entry_bar_time = try_entry(
                 bridge,
+                position_manager,
                 strategy,
-                previous_market_state,
+                prev_state,
                 history,
                 spread,
-                current_bar_time
+                current_bar_time,
+                last_entry_bar_time
             )
-            
-            loop_time = time.time() - loop_iteration_start
-            
-            if signal_executed:
+
+            if execute:
+                loop_time = time.time() - loop_iteration_start
                 log(f"Signal executed in {loop_time:.3f}s")
-            
-            # Sleep to avoid hammering the API
+
             time.sleep(TICK_SLEEP)
-    
+
     except KeyboardInterrupt:
-        log("Shutdown requested")
+        log("Stopped by user")
     except Exception as e:
         log(f"ERROR: {e}")
         import traceback
@@ -225,5 +222,6 @@ def main():
         elapsed = time.time() - loop_start
         log(f"Stopped. Processed {tick_counter} ticks in {elapsed:.1f}s ({tick_counter/elapsed:.1f} ticks/sec)")
 
-def run_forward(strategy_name: str = "bb_squeeze"):
+
+def run_forward(strategy_name: str = "bb_squeeze") -> None:
     main()

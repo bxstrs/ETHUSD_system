@@ -1,3 +1,4 @@
+'''src/strategies/strategy_loader.py'''
 from src.config.loader import load_yaml
 from src.strategies.registry import STRATEGY_REGISTRY
 

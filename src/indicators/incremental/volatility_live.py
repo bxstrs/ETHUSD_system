@@ -1,14 +1,7 @@
+'''src/indicators/incremental/volatility_live.py'''
 import math
 from collections import deque
 from typing import Tuple, Optional
-
-"""
-Incremental volatility indicators for live trading.
-
-Maintains state to avoid recalculating entire history on every tick.
-Only updates on new candle closes.
-"""
-
 
 class IncrementalVolatility:
 

@@ -1,3 +1,4 @@
+'''src/strategies/base.py'''
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 
@@ -8,6 +9,7 @@ class Strategy(ABC):
     def __init__(self, config: Any):
         self.config = config
         self.strategy_id = self.__class__.__name__
+        self.magic_number = hash(self.strategy_id) % (10 ** 8)
 
     # -----------------------------
     # Entry
@@ -42,7 +44,7 @@ class Strategy(ABC):
     # -----------------------------
     # State update (after trade closes)
     # -----------------------------
-    def update_trade_result(self, trade: Trade):
+    def update_trade_result(self, trade: Trade) -> None:
         """
         Optional override
         """

@@ -1,3 +1,4 @@
+'''src/strategies/bb_squeeze/config.py'''
 from dataclasses import dataclass
 
 @dataclass

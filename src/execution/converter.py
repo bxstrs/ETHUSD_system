@@ -1,3 +1,4 @@
+'''src/execution/converter.py'''
 import MetaTrader5 as mt5
 from src.core.types import Trade, Direction
 
@@ -11,6 +12,7 @@ def convert_position_to_trade(pos) -> Trade:
 
     return Trade(
         trade_id=str(pos.ticket),
+        strategy_id=pos.comment,
         symbol=pos.symbol,
         direction=direction,
         entry_price=pos.price_open,

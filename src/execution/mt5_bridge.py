@@ -1,3 +1,4 @@
+'''src/execution/mt5_bridge.py'''
 import MetaTrader5 as mt5
 from typing import Dict, Optional
 
@@ -56,7 +57,7 @@ class MT5Bridge:
         tick = self.get_tick(symbol)
         info = mt5.symbol_info(symbol)
 
-        if not tick or not info:
+        if not tick or not info or not tick.ask or not tick.bid:
             return float("inf")
 
         return (tick.ask - tick.bid) / info.point
@@ -64,7 +65,15 @@ class MT5Bridge:
     # -----------------------------
     # Trading
     # -----------------------------
-    def send_order(self, symbol: str, direction: str, volume: float):
+    def send_order(
+            self, 
+            symbol: str, 
+            direction: str, 
+            volume: float,
+            magic: int = 999999,
+            comment: str = "foreward_test"
+        ):
+
         tick = self.get_tick(symbol)
 
         if direction == "BUY":
@@ -81,8 +90,8 @@ class MT5Bridge:
             "type": order_type,
             "price": price,
             "deviation": 10,
-            "magic": 999999,
-            "comment": "forward_test",
+            "magic": magic,
+            "comment": comment,
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }

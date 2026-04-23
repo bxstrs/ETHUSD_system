@@ -3,7 +3,7 @@ import time
 LOG_LEVEL = "INFO"  # DEBUG, INFO, ERROR
 
 def log(msg, level="INFO"):
-    levels = ["DEBUG", "INFO", "SIGNAL"]
+    levels = ["DEBUG", "INFO", "SIGNAL", "WARNING", "ERROR"]
 
     if levels.index(level) < levels.index(LOG_LEVEL):
         return

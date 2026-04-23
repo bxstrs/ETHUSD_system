@@ -1,3 +1,4 @@
+'''src/strategies/bb_squeeze/signal.py'''
 from typing import Optional
 
 from src.core.types import Signal, Direction, MarketState
