@@ -28,9 +28,19 @@ class PositionManager:
 
         result = []
         for pos in positions:
-            trade = convert_position_to_trade(pos)
-            if trade.strategy_id == strategy_id:
-                result.append((pos, trade))
+            match = pos.comment == str(strategy_id)
+            log(
+                f"[POSITION] ticket={pos.ticket} | "
+                f"raw_comment='{pos.comment}' | "
+                f"expected='{strategy_id}' | "
+                f"exact_match={match} | "
+                f"startswith={pos.comment.startswith(strategy_id)}",
+                level="DEBUG"
+            )
+            if match:
+                result.append((pos, convert_position_to_trade(pos)))
+
+        log(f"[POSITION] {len(result)} position(s) matched strategy_id='{strategy_id}'", level="DEBUG")
         return result
 
     def has_open_position(self, symbol: str, strategy_id: str) -> bool:

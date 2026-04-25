@@ -68,8 +68,10 @@ class Signal:
 class Trade:
     """A completed or open trade."""
     # Identifiers
-    trade_id: str
     symbol: str
+    trade_id: str
+    #signal_id: str
+    strategy_id: str
 
     # Order details
     direction: Direction
@@ -80,8 +82,6 @@ class Trade:
 
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
-    signal_id: Optional[str] = None
-    strategy_id: Optional[str] = None
     exit_price: Optional[float] = None
     exit_time: Optional[datetime] = None
 

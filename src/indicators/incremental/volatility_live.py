@@ -7,7 +7,7 @@ class IncrementalVolatility:
 
      # Updates only when new candle data arrives, caches results between ticks.
     
-    def __init__(self, bb_period: int = 25, bb_dev: float = 1.0, atr_period: int = 20):
+    def __init__(self, bb_period: int, bb_dev: float, atr_period: int):
         self.bb_period = bb_period
         self.bb_dev = bb_dev
         self.atr_period = atr_period
@@ -16,17 +16,20 @@ class IncrementalVolatility:
         self.closes = deque(maxlen=bb_period)
         self.tr_values = deque(maxlen=atr_period)
 
-        # Running sums for BB
+        # Running sums for BB and ATR
         self._sum = 0.0
         self._sum_sq = 0.0
-
-        # Running sum for ATR
         self._tr_sum = 0.0
         
         # Cached results
+        self._prev_bb_upper: Optional[float] = None
+        self._prev_bb_lower: Optional[float] = None
+        self._prev_bb_middle: Optional[float] = None
+
         self._bb_upper: Optional[float] = None
         self._bb_lower: Optional[float] = None
         self._bb_middle: Optional[float] = None
+        
         self._atr: float = 0.0
         
     def update(
@@ -70,6 +73,9 @@ class IncrementalVolatility:
     
     def _recalculate(self) -> None:
         """Recalculate BB and ATR using running sums."""
+        self._prev_bb_upper = self._bb_upper
+        self._prev_bb_lower = self._bb_lower
+        self._prev_bb_middle = self._bb_middle
 
         # ---- Bollinger Bands ----
         n = len(self.closes)
@@ -98,6 +104,9 @@ class IncrementalVolatility:
 
     def get_bollinger_bands(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
         return self._bb_upper, self._bb_lower, self._bb_middle
+    
+    def get_previous_bollinger_bands(self):
+        return self._prev_bb_upper, self._prev_bb_lower, self._prev_bb_middle
 
     def get_atr(self) -> float:
         return self._atr

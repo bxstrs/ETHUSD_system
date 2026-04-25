@@ -10,16 +10,17 @@ from src.indicators.incremental.volatility_live import (
 )
 from src.utils.logger import log
 
-class BBSqueezeStrategy(Strategy):
+class BBSqueeze(Strategy):
     def __init__(self,config: BBSqueezeConfig):
         super().__init__(config)
-        self.strategy_id = self.__class__.__name__
 
         # adaptive state
-        self.last_trade_was_loss = False
+        self._last_trade_was_loss = False
         self._near_breakout_logged = False
-        self.last_close_time = None
-        self.last_close_bar_time = None
+
+        self._last_exit_bar_time = None # Data of exit time and holding period
+        self._current_bar_time = None
+        self._last_signal_setup_time = None # State of used candle
 
         self.vol = IncrementalVolatility(
             bb_period=config.bb_period,
@@ -31,7 +32,6 @@ class BBSqueezeStrategy(Strategy):
             bw_ma_period=config.bw_ma_period
         )
 
-        self._last_bar_time = None
 
     def on_new_bar(self, history: dict):
         closes = history["close"]
@@ -64,21 +64,25 @@ class BBSqueezeStrategy(Strategy):
     ) -> Optional[Signal]:
 
         current_bar_time = history["timestamp"][-1]
+        setup_bar_time = history["timestamp"][-2]
 
-        if self._last_bar_time != current_bar_time:
+        if self._current_bar_time != current_bar_time:
             log(
-                f"[BAR DETECTED] ts={current_bar_time}, prev={self._last_bar_time}",
+                f"[BAR DETECTED] ts={current_bar_time}, prev={self._current_bar_time}",
                 level="INFO"
-            )
+            ) 
             self.on_new_bar(history)
-            self._last_bar_time = current_bar_time
+            self._current_bar_time = current_bar_time # -> WORKING ✅
         
         # readiness check
         if not (self.vol.is_ready() and self.bw_ma.is_ready()):
-            return None
+            return None # -> INDICATOR PREP IS NOT WORKING
 
-        # prevent same bar re-entry
-        if self.last_close_bar_time == self._last_bar_time:
+        # Prevent same bar re-entry -> WORKING ✅
+        if self._last_exit_bar_time == self._current_bar_time:
+            return None
+        
+        if setup_bar_time == self._last_signal_setup_time:
             return None
 
         if spread > self.config.max_spread:
@@ -90,16 +94,16 @@ class BBSqueezeStrategy(Strategy):
         opens = history["open"]
 
         # previous candle
-        open1 = opens[-1]
-        close1 = closes[-1]
-        high1 = highs[-1]
-        low1 = lows[-1]
+        open1 = opens[-2]
+        close1 = closes[-2]
+        high1 = highs[-2]
+        low1 = lows[-2]
 
     # ===== USE INCREMENTAL VALUES =====
-        upper, lower, middle = self.vol.get_bollinger_bands()
+        prev_upper, prev_lower, _ = self.vol.get_previous_bollinger_bands()
 
         # early BB = None prevention
-        if upper is None or lower is None:
+        if prev_upper is None or prev_lower is None:
             return None
         
         atr_value = self.vol.get_atr()
@@ -111,10 +115,10 @@ class BBSqueezeStrategy(Strategy):
         bw = self.vol.get_bandwidth()
         bw_ma = self.bw_ma.get_bandwidth_ma()
 
-        if close1 > upper * 0.98 or close1 < lower * 0.98:
+        if close1 > prev_upper * 0.98 or close1 < prev_lower * 0.98:
             if not self._near_breakout_logged:
                 log(
-                    f"[NEAR BREAKOUT] close={close1:.5f}, upper={upper}, lower={lower}, "
+                    f"[NEAR BREAKOUT] close={close1:.5f}, upper={prev_upper}, lower={prev_lower}, "
                     f"bw={bw:.6f}, bw_ma={bw_ma:.6f}", level="INFO"
                 )
                 self._near_breakout_logged = True
@@ -129,21 +133,22 @@ class BBSqueezeStrategy(Strategy):
             return None
 
         # adaptive filter
-        if self.last_trade_was_loss:
+        if self._last_trade_was_loss:
             if abs(close1 - open1) <= self.config.adaptive_constant * atr_value:
                 return None
 
         # invalid candle
         valid_candle = not (
-            (open1 > upper and close1 < lower)
-            or (open1 < lower and close1 > upper)
+            (open1 > prev_upper and close1 < prev_upper)
+            or (open1 < prev_lower and close1 > prev_lower)
         )
 
         # -----------------------------
         # BUY
         # -----------------------------
-        if close1 > upper and valid_candle:
+        if close1 > prev_upper and valid_candle:
             if market_state.ask and market_state.ask > high1 + 0.1 * atr_value:
+                self._last_signal_setup_time = setup_bar_time  # consume setup candle
                 return Signal(
                     signal_id=f"{market_state.timestamp}_BUY",
                     symbol=market_state.symbol,
@@ -157,8 +162,9 @@ class BBSqueezeStrategy(Strategy):
         # -----------------------------
         # SELL
         # -----------------------------
-        if close1 < lower and valid_candle:
+        if close1 < prev_lower and valid_candle:
             if market_state.bid and market_state.bid < low1 - 0.1 * atr_value:
+                self._last_signal_setup_time = setup_bar_time  # consume setup candle
                 return Signal(
                     signal_id=f"{market_state.timestamp}_SELL",
                     symbol=market_state.symbol,
@@ -174,7 +180,7 @@ class BBSqueezeStrategy(Strategy):
     # -----------------------------
     # Exit logic (returns True/False)
     # -----------------------------
-    def check_exit(self, trade, market_state, history) -> bool:
+    def check_exit(self, trade, market_state, closes) -> bool:
         upper, lower, middle = self.vol.get_bollinger_bands()
         # not ready → no exit
         if upper is None or lower is None:
@@ -182,12 +188,12 @@ class BBSqueezeStrategy(Strategy):
 
         if trade.direction == Direction.LONG:
             # exit if price returns inside / below lower band
-            if market_state.bid and market_state.bid <= lower:
+            if market_state.bid and closes[-1] <= lower:
                 return True
 
         elif trade.direction == Direction.SHORT:
             # exit if price returns inside / above upper band
-            if market_state.ask and market_state.ask >= upper:
+            if market_state.ask and closes[-1] >= upper:
                 return True
 
         return False
@@ -196,10 +202,9 @@ class BBSqueezeStrategy(Strategy):
     # Update state
     # -----------------------------
     def update_trade_result(self, trade):
-        self.last_close_time = trade.exit_time
-        self.last_close_bar_time = self._last_bar_time
+        self._last_exit_bar_time = self._current_bar_time
 
         if trade.net_pnl is None:
             return
 
-        self.last_trade_was_loss = trade.net_pnl < 0
+        self._last_trade_was_loss = trade.net_pnl < 0

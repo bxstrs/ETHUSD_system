@@ -64,7 +64,8 @@ def warmup_strategy(strategy, history):
 
         strategy.on_new_bar(sub_history)
 
-    strategy._last_bar_time = history["timestamp"][-1]
+    strategy._current_bar_time = history["timestamp"][-1]
+    log("indicators ready")
 
 # =========================
 # Entry Logic
@@ -77,19 +78,19 @@ def try_entry(
     history,
     spread,
     current_bar_time,
-    last_entry_bar_time
+    _last_entry_bar_time
 ):
     # prevent risk rule breach
     if not position_manager.can_trade():
-        return False, last_entry_bar_time
+        return False, _last_entry_bar_time
 
     # prevent same bar entry
-    if last_entry_bar_time == current_bar_time:
-        return False, last_entry_bar_time
+    if _last_entry_bar_time == current_bar_time:
+        return False, _last_entry_bar_time
 
     # enforce position rule
     if position_manager.has_open_position(SYMBOL, strategy.strategy_id):
-        return False, last_entry_bar_time
+        return False, _last_entry_bar_time
 
     signal = strategy.generate_signal(
         market_state=market_state,
@@ -98,7 +99,7 @@ def try_entry(
     )
 
     if not signal:
-        return False, last_entry_bar_time
+        return False, _last_entry_bar_time
 
     direction = "BUY" if signal.direction.name == "LONG" else "SELL"
 
@@ -115,7 +116,7 @@ def try_entry(
     if result and result.retcode == mt5.TRADE_RETCODE_DONE:
         return True, current_bar_time
 
-    return False, last_entry_bar_time
+    return False, _last_entry_bar_time
 
 
 # =========================
@@ -139,14 +140,15 @@ def main():
         return
 
     warmup_strategy(strategy, history)
-    log("Strategy warmed up and ready")
     
     #Loop state
     tick_counter = 0
-    last_entry_bar_time = None
+    _last_entry_bar_time = None
     current_bar_time = history["timestamp"][-1]
     last_fetch_time = time.time()
     loop_start = time.time()
+
+    _had_position = position_manager.has_open_position(SYMBOL, strategy.strategy_id)
 
     try:
         while True:
@@ -192,6 +194,16 @@ def main():
             current_state = build_market_state(history, tick, use_previous=False)
             position_manager.handle_exit(strategy, current_state, history)
             
+            current_has_position = position_manager.has_open_position(SYMBOL, strategy.strategy_id)
+ 
+            if _had_position and not current_has_position:
+                log(
+                    "[POSITION CLOSED] Blocking re-entry for current bar.",
+                    level="INFO",
+                )
+                _last_entry_bar_time = current_bar_time
+ 
+            _had_position = current_has_position
 
             # =========================
             # ENTRY (previous candle)
@@ -199,7 +211,7 @@ def main():
             prev_state = build_market_state(history, tick, True)
             spread = bridge.get_spread(SYMBOL)
 
-            execute, last_entry_bar_time = try_entry(
+            execute, _last_entry_bar_time = try_entry(
                 bridge,
                 position_manager,
                 strategy,
@@ -207,10 +219,11 @@ def main():
                 history,
                 spread,
                 current_bar_time,
-                last_entry_bar_time
+                _last_entry_bar_time
             )
 
             if execute:
+                _had_position = True
                 loop_time = time.time() - loop_iteration_start
                 log(f"Signal executed in {loop_time:.3f}s")
 
