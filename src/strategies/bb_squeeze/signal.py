@@ -32,8 +32,8 @@ class BBSqueeze(Strategy):
             bw_ma_period=config.bw_ma_period
         )
 
-
-    def on_new_bar(self, history: dict):
+    # SEEM TO WORK CORRECTLY
+    def on_new_bar(self, history: dict):  
         closes = history["close"]
         highs = history["high"]
         lows = history["low"]

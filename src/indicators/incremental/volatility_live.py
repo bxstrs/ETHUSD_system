@@ -73,6 +73,7 @@ class IncrementalVolatility:
     
     def _recalculate(self) -> None:
         """Recalculate BB and ATR using running sums."""
+        
         self._prev_bb_upper = self._bb_upper
         self._prev_bb_lower = self._bb_lower
         self._prev_bb_middle = self._bb_middle
