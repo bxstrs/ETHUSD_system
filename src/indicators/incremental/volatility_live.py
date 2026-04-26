@@ -33,6 +33,7 @@ class IncrementalVolatility:
         close: float,
         high: float,
         low: float,
+        prev_close: float = 0.0
     ) -> None:
         """
         Update with new tick data.
@@ -51,8 +52,8 @@ class IncrementalVolatility:
         # ===== TRUE RANGE UPDATE =====
         tr = max(
             high - low,
-            abs(high - close),
-            abs(low - close),
+            abs(high - prev_close),
+            abs(low - prev_close),
         )
 
         if len(self.tr_values) == self.atr_period:
