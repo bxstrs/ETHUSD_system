@@ -1,12 +1,16 @@
 '''src/execution/position_manager.py'''
 from typing import List, Tuple
 
+import MetaTrader5 as mt5  
 from src.execution.converter import convert_position_to_trade   
 from src.core.types import Trade
 from src.utils.logger import log
+from src.utils.data_logger import DataLogger
 
 MAX_CONSECUTIVE_LOSSES = 5
 MAX_DRAWDOWN = 0.2  # 20% drawdown
+
+datalogger = DataLogger()
 
 class PositionManager:
     def __init__(self, bridge):
@@ -93,15 +97,25 @@ class PositionManager:
             if strategy.check_exit(trade, market_state, history["close"]):
                 exit_price = (
                     market_state.bid
-                    if trade.direction.name == "LONG"
-                    else market_state.ask
                 )
                 log(f"[EXIT SIGNAL] {trade.direction} at {exit_price}", level="SIGNAL")
-                self.bridge.close_position(pos)
 
-                trade.exit_price = pos.price_current
+                result =self.bridge.close_position(pos)
+                actual_exit_price = result.price if result and result.retcode == mt5.TRADE_RETCODE_DONE else market_state.bid
+                actual_pnl = result.profit if result and hasattr(result, "profit") else None
+
+                datalogger.log_trade(
+                    ts=market_state.timestamp,
+                    type="EXIT",
+                    direction=trade.direction.name,
+                    price=exit_price,
+                    pnl=trade.net_pnl,
+                    note="exit_signal"
+                )
+
+                trade.exit_price = actual_exit_price
                 trade.exit_time = market_state.timestamp
-                trade.net_pnl = pos.profit
+                trade.net_pnl = actual_pnl
 
                 self._update_risk(trade)
                 strategy.update_trade_result(trade)

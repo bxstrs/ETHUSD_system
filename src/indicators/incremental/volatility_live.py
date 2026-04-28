@@ -25,15 +25,20 @@ class IncrementalVolatility:
         self._bb_upper: Optional[float] = None
         self._bb_lower: Optional[float] = None
         self._bb_middle: Optional[float] = None
-        
         self._atr: float = 0.0
+
+        # Previous values for signal generation
+        self._prev_bb_upper: Optional[float] = None
+        self._prev_bb_lower: Optional[float] = None
+        self._prev_bb_middle: Optional[float] = None
+        
         
     def update(
         self,
         close: float,
         high: float,
         low: float,
-        prev_close: float = 0.0
+        prev_close: float
     ) -> None:
         """
         Update with new tick data.
@@ -69,7 +74,12 @@ class IncrementalVolatility:
     def _recalculate(self) -> None:
         """Recalculate BB and ATR using running sums."""
 
-        # ---- Bollinger Bands ----
+        # ---- SHIFT CURRENT → PREVIOUS ----
+        self._prev_bb_upper = self._bb_upper
+        self._prev_bb_lower = self._bb_lower
+        self._prev_bb_middle = self._bb_middle
+
+        # ---- Bollinger Bands (CURRENT) ----
         n = len(self.closes)
         if n < self.bb_period:
             self._bb_upper = None
@@ -78,24 +88,24 @@ class IncrementalVolatility:
         else:
             mean = self._sum / n
             variance = (self._sum_sq / n) - (mean * mean)
-            variance = max(variance, 0.0)  # prevent negative due to floating point
+            variance = max(variance, 0.0)
             std = math.sqrt(variance)
-            
+
             self._bb_middle = mean
             self._bb_upper = mean + self.bb_dev * std
             self._bb_lower = mean - self.bb_dev * std
-        
+
         # ---- ATR ----
         m = len(self.tr_values)
-        if m > 0:
-            self._atr = self._tr_sum / m
-        else:
-            self._atr = 0.0
+        self._atr = self._tr_sum / m if m > 0 else 0.0
     
      # ===== GETTERS =====
-
+    
     def get_bollinger_bands(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
         return self._bb_upper, self._bb_lower, self._bb_middle
+
+    def get_previous_bollinger_bands(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        return self._prev_bb_upper, self._prev_bb_lower, self._prev_bb_middle
 
     def get_atr(self) -> float:
         return self._atr

@@ -8,7 +8,10 @@ from src.indicators.incremental.volatility_live import (
     IncrementalVolatility,
     BandwidthMACalculator
 )
+
 from src.utils.logger import log
+from src.utils.data_logger import DataLogger
+datalogger = DataLogger()
 
 class BBSqueeze(Strategy):
     def __init__(self,config: BBSqueezeConfig):
@@ -16,10 +19,9 @@ class BBSqueeze(Strategy):
 
         # adaptive state
         self._last_trade_was_loss = False
-
-        self._last_exit_bar_time = None # re-entry prevention
-        self._current_bar_time = None # new candle log
-        self._consumed_setup_time = None # same-setup prevention
+        self._current_bar_time = None       # new candle log
+        self._tracked_setup_bar = None      # setup bar (history[-2]) being monitored
+        self._entry_window_bar = None       # current_bar_time when this setup first appeared
 
         self.indicators = IncrementalVolatility(
             bb_period=config.bb_period,
@@ -39,16 +41,17 @@ class BBSqueeze(Strategy):
         if len(closes) < 3:
             return
 
-        close = closes[-2]
-        high = highs[-2]
-        low = lows[-2]
-        prev_close = closes[-3]
+        # previous data Bollinger Bands as a evaluation for current bar
+        close = closes[-1]
+        high = highs[-1]
+        low = lows[-1]
+        
+        # True range calculation requires previous close.
+        prev_close = closes[-2]
 
         self.indicators.update(close, high, low, prev_close)
-
-        # update bandwidth MA
-        bw = self.indicators.get_bandwidth()
-        self.bandwidth_ma.update(bw)
+        bandwidth = self.indicators.get_bandwidth()
+        self.bandwidth_ma.update(bandwidth)
 
 
     # -----------------------------
@@ -66,79 +69,104 @@ class BBSqueeze(Strategy):
 
         if self._current_bar_time != current_bar_time:
             log(
-                f"[BAR DETECTED] ts={current_bar_time}, prev={self._current_bar_time}",
+                f"[NEW BAR] ts={current_bar_time}, prev={self._current_bar_time}",
                 level="INFO"
             ) 
             self.on_new_bar(history)
             self._current_bar_time = current_bar_time 
         
         if not (self.indicators.is_ready() and self.bandwidth_ma.is_ready()):
-            log(f"[FILTERED] indicators: {self.indicators.is_ready()}, bw_ma: {self.bandwidth_ma.is_ready()}")
+            log(f"Indicators status: {self.indicators.is_ready()}, bw_ma: {self.bandwidth_ma.is_ready()}")
             return None 
-
-        if self._last_exit_bar_time == self._current_bar_time:
-            log("[FILTERED] same bar re-entry")
-            return None
         
-        if setup_bar_time == self._consumed_setup_time:
-            log("[FILTERED] this setup candle was already used")
-            return None
-
         if spread > self.config.max_spread:
-            log(f"[FILTERED] spread too high: {spread}")
+            log(f"[FILTERED] spread too high: {spread}",
+                level="INFO")
             return None
         
+        if self._tracked_setup_bar != setup_bar_time:
+            self._tracked_setup_bar = setup_bar_time
+            self._entry_window_bar = current_bar_time
+
+        if current_bar_time != self._entry_window_bar:
+            log(
+                f"[FILTERED] Setup expired — setup={setup_bar_time}, "
+                f"window={self._entry_window_bar}, now={current_bar_time}",
+                level="INFO"
+            )
+            return None
+        
+        if len(history["timestamp"]) >= 3:
+            bar_interval = history["timestamp"][-2] - history["timestamp"][-3]
+            actual_gap   = history["timestamp"][-1] - history["timestamp"][-2]
+            if bar_interval > 0 and actual_gap > bar_interval * 1.5:
+                log(
+                    f"[FILTERED] Data gap detected — "
+                    f"expected ~{bar_interval}s, got {actual_gap}s",
+                    level="WARNING"
+                )
+                return None
+ 
+        
+        # ===== USE INCREMENTAL VALUES =====
+        prev_upper, prev_lower, _ = self.indicators.get_previous_bollinger_bands()
+        atr_value = self.indicators.get_atr()
+        bandwidth = self.indicators.get_bandwidth()
+        bandwidth_ma = self.bandwidth_ma.get_bandwidth_ma()
+
+        # evaluation indicator status
+        if prev_upper is None or prev_lower is None or atr_value == 0 or bandwidth_ma == 0:
+            return None
+
+        # bandwidth filter
+        if bandwidth >= self.config.constant * bandwidth_ma:
+            datalogger.log_signal(
+                ts=market_state.timestamp,
+                bar_time=current_bar_time,
+                bw=bandwidth,
+                bw_ma=bandwidth_ma,
+                spread=spread,
+                filter="bandwidth",
+                decision="REJECT"
+            )
+            return None
+
         closes = history["close"]
         highs = history["high"]
         lows = history["low"]
         opens = history["open"]
 
-        # previous candle
-        open2 = opens[-2]
-        close2 = closes[-2]
-        high2 = highs[-2]
-        low2 = lows[-2]
+        prev_open = opens[-2]
+        prev_close = closes[-2]
+        prev_high = highs[-2]
+        prev_low = lows[-2]
 
-    # ===== USE INCREMENTAL VALUES =====
-        prev_upper, prev_lower, _ = self.indicators.get_bollinger_bands()
-
-        # early BB = None prevention
-        if prev_upper is None or prev_lower is None:
-            return None
-        
-        atr_value = self.indicators.get_atr()
-
-        # early ATR = 0 prevention
-        if atr_value == 0:
-            return None
-        
-        bw = self.indicators.get_bandwidth()
-        bw_ma = self.bandwidth_ma.get_bandwidth_ma()
-
-        if bw_ma == 0:
-            return None
-
-        # bandwidth filter
-        if bw >= self.config.constant * bw_ma:
-            return None
-
-        # adaptive filter
+        # ── Adaptive filter (tighten after a loss) ───────────────────
         if self._last_trade_was_loss:
-            if abs(close2 - open2) <= self.config.adaptive_constant * atr_value:
+            if abs(prev_close - prev_open) <= self.config.adaptive_constant * atr_value:
                 return None
 
-        # invalid candle
+        # ── Candle validity ──────────────────────────────────────────
+        # Reject full-range candles that cross both bands (indecisive)
         valid_candle = not (
-            (open2 > prev_upper and close2 < prev_upper)
-            or (open2 < prev_lower and close2 > prev_lower)
+            (prev_open > prev_upper and prev_close < prev_upper)
+            or (prev_open < prev_lower and prev_close > prev_lower)
         )
 
         # -----------------------------
         # BUY
         # -----------------------------
-        if  close2 > prev_upper and valid_candle:
-            if market_state.ask and market_state.ask > high2 + 0.1 * atr_value:
-                self._consumed_setup_time = setup_bar_time  # consume setup candle
+        if  prev_close > prev_upper and valid_candle:
+            if market_state.ask and market_state.ask > prev_high + 0.1 * atr_value:
+                datalogger.log_signal(
+                    ts=market_state.timestamp,
+                    bar_time=current_bar_time,
+                    bw=bandwidth,
+                    bw_ma=bandwidth_ma,
+                    spread=spread,
+                    filter="PASS",
+                    decision="BUY"
+                )
                 return Signal(
                     signal_id=f"{market_state.timestamp}_BUY",
                     symbol=market_state.symbol,
@@ -152,9 +180,17 @@ class BBSqueeze(Strategy):
         # -----------------------------
         # SELL
         # -----------------------------
-        if close2 < prev_lower and valid_candle:
-            if market_state.bid and market_state.bid < low2 - 0.1 * atr_value:
-                self._consumed_setup_time = setup_bar_time  # consume setup candle
+        if prev_close < prev_lower and valid_candle:
+            if market_state.bid and market_state.bid < prev_low - 0.1 * atr_value:
+                datalogger.log_signal(
+                    ts=market_state.timestamp,
+                    bar_time=current_bar_time,
+                    bw=bandwidth,
+                    bw_ma=bandwidth_ma,
+                    spread=spread,
+                    filter="PASS",
+                    decision="SELL"
+                )
                 return Signal(
                     signal_id=f"{market_state.timestamp}_SELL",
                     symbol=market_state.symbol,
@@ -171,19 +207,18 @@ class BBSqueeze(Strategy):
     # Exit logic (returns True/False)
     # -----------------------------
     def check_exit(self, trade, market_state, closes) -> bool:
-        upper, lower, middle = self.indicators.get_bollinger_bands()
-        # not ready → no exit
+        upper, lower, _ = self.indicators.get_bollinger_bands()
         if upper is None or lower is None:
             return False
 
         if trade.direction == Direction.LONG:
             # exit if price returns inside / below lower band
-            if market_state.bid and closes[-1] <= lower:
+            if market_state.bid and market_state.bid <= lower:
                 return True
 
         elif trade.direction == Direction.SHORT:
             # exit if price returns inside / above upper band
-            if market_state.ask and closes[-1] >= upper:
+            if market_state.bid and market_state.bid >= upper:
                 return True
 
         return False
@@ -192,9 +227,6 @@ class BBSqueeze(Strategy):
     # Update state
     # -----------------------------
     def update_trade_result(self, trade):
-        self._last_exit_bar_time = self._current_bar_time
-
         if trade.net_pnl is None:
             return
-
         self._last_trade_was_loss = trade.net_pnl < 0

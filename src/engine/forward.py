@@ -6,6 +6,7 @@ from src.core.types import MarketState
 from src.strategies.strategy_loader import load_strategy
 from src.execution.mt5_bridge import MT5Bridge
 from src.utils.logger import log
+from src.utils.data_logger import DataLogger
 from src.execution.position_manager import PositionManager
 
 # ============================================================================
@@ -14,7 +15,7 @@ from src.execution.position_manager import PositionManager
 
 SYMBOL = "ETHUSD#"
 TIMEFRAME = mt5.TIMEFRAME_M1
-STR_TIMEFRAME = "1m"
+STR_TIMEFRAME = "4h"
 
 TICK_SLEEP = 0.1  # seconds (100ms = ~10 ticks/sec)
 RATE_FETCH_INTERVAL = 1  # fetch full history every N ticks (reduce redundant calls)
@@ -23,8 +24,10 @@ RATE_FETCH_INTERVAL = 1  # fetch full history every N ticks (reduce redundant ca
 # Helpers
 # ============================================================================
 
+datalogger = DataLogger()
+
 def fetch_data(bridge):
-    history = bridge.get_rates(SYMBOL, TIMEFRAME, 180)
+    history = bridge.get_rates(SYMBOL, TIMEFRAME, 220)
     tick = bridge.get_tick(SYMBOL)
 
     if history is None or tick is None:
@@ -61,11 +64,9 @@ def warmup_strategy(strategy, history):
             "open": history["open"][:i+1],
             "timestamp": history["timestamp"][:i+1],
         }
-
         strategy.on_new_bar(sub_history)
-
     strategy._current_bar_time = history["timestamp"][-1]
-    log("indicators ready")
+    log("warmup call succeeded, indicators ready")
 
 # =========================
 # Entry Logic
@@ -84,12 +85,12 @@ def try_entry(
     if not position_manager.can_trade():
         return False, _last_entry_bar_time
 
-    # prevent same bar entry
-    if _last_entry_bar_time == current_bar_time:
-        return False, _last_entry_bar_time
-
     # enforce position rule
     if position_manager.has_open_position(SYMBOL, strategy.strategy_id):
+        return False, _last_entry_bar_time
+
+    # prevent same bar entry
+    if _last_entry_bar_time == current_bar_time:
         return False, _last_entry_bar_time
 
     signal = strategy.generate_signal(
@@ -114,6 +115,14 @@ def try_entry(
     )
 
     if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+        datalogger.log_trade(
+            ts=time.time(),
+            type="ENTRY",
+            direction=direction,
+            price=signal.entry_price,
+            pnl=0,
+            note="entry"
+        )
         return True, current_bar_time
 
     return False, _last_entry_bar_time
@@ -208,14 +217,14 @@ def main():
             # =========================
             # ENTRY (previous candle)
             # =========================
-            prev_state = build_market_state(history, tick, True)
+            setup_state = build_market_state(history, tick, True)
             spread = bridge.get_spread(SYMBOL)
 
             execute, _last_entry_bar_time = try_entry(
                 bridge,
                 position_manager,
                 strategy,
-                prev_state,
+                setup_state,
                 history,
                 spread,
                 current_bar_time,
