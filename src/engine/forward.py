@@ -124,8 +124,8 @@ def try_entry(
             note="entry"
         )
         return True, current_bar_time
-
     return False, _last_entry_bar_time
+
 
 
 # =========================
@@ -201,7 +201,7 @@ def main():
             # EXIT (current candle)
             # =========================
             current_state = build_market_state(history, tick, use_previous=False)
-            position_manager.handle_exit(strategy, current_state, history)
+            position_manager.handle_exit(strategy, current_state)
             
             current_has_position = position_manager.has_open_position(SYMBOL, strategy.strategy_id)
  

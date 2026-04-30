@@ -41,13 +41,10 @@ class BBSqueeze(Strategy):
         if len(closes) < 3:
             return
 
-        # previous data Bollinger Bands as a evaluation for current bar
         close = closes[-1]
         high = highs[-1]
         low = lows[-1]
-        
-        # True range calculation requires previous close.
-        prev_close = closes[-2]
+        prev_close = closes[-2]     # TR calculation
 
         self.indicators.update(close, high, low, prev_close)
         bandwidth = self.indicators.get_bandwidth()
@@ -68,20 +65,20 @@ class BBSqueeze(Strategy):
         setup_bar_time = history["timestamp"][-2]
 
         if self._current_bar_time != current_bar_time:
-            log(
-                f"[NEW BAR] ts={current_bar_time}, prev={self._current_bar_time}",
-                level="INFO"
-            ) 
+
             self.on_new_bar(history)
             self._current_bar_time = current_bar_time 
+
+            log( f"[NEW BAR] ts={current_bar_time}, prev={self._current_bar_time}")        
         
         if not (self.indicators.is_ready() and self.bandwidth_ma.is_ready()):
             log(f"Indicators status: {self.indicators.is_ready()}, bw_ma: {self.bandwidth_ma.is_ready()}")
+
             return None 
         
         if spread > self.config.max_spread:
-            log(f"[FILTERED] spread too high: {spread}",
-                level="INFO")
+            log(f"[FILTERED] spread too high: {spread}")
+
             return None
         
         if self._tracked_setup_bar != setup_bar_time:
@@ -89,11 +86,7 @@ class BBSqueeze(Strategy):
             self._entry_window_bar = current_bar_time
 
         if current_bar_time != self._entry_window_bar:
-            log(
-                f"[FILTERED] Setup expired — setup={setup_bar_time}, "
-                f"window={self._entry_window_bar}, now={current_bar_time}",
-                level="INFO"
-            )
+            log(f"[FILTERED] Setup expired — setup={setup_bar_time}, "f"window={self._entry_window_bar}, now={current_bar_time}",)
             return None
         
         if len(history["timestamp"]) >= 3:
@@ -157,7 +150,7 @@ class BBSqueeze(Strategy):
         # BUY
         # -----------------------------
         if  prev_close > prev_upper and valid_candle:
-            if market_state.ask and market_state.ask > prev_high + 0.1 * atr_value:
+            if market_state.ask and market_state.ask > prev_high + 0.1 * atr_value + spread:
                 datalogger.log_signal(
                     ts=market_state.timestamp,
                     bar_time=current_bar_time,
@@ -181,7 +174,7 @@ class BBSqueeze(Strategy):
         # SELL
         # -----------------------------
         if prev_close < prev_lower and valid_candle:
-            if market_state.bid and market_state.bid < prev_low - 0.1 * atr_value:
+            if market_state.bid and market_state.bid < prev_low - 0.1 * atr_value - spread:
                 datalogger.log_signal(
                     ts=market_state.timestamp,
                     bar_time=current_bar_time,
@@ -206,19 +199,23 @@ class BBSqueeze(Strategy):
     # -----------------------------
     # Exit logic (returns True/False)
     # -----------------------------
-    def check_exit(self, trade, market_state, closes) -> bool:
+    def check_exit(self, trade, market_state) -> bool:
         upper, lower, _ = self.indicators.get_bollinger_bands()
+
+        if market_state.bid and market_state.ask:
+            mid_price = (market_state.bid + market_state.ask) / 2
+
         if upper is None or lower is None:
             return False
 
         if trade.direction == Direction.LONG:
             # exit if price returns inside / below lower band
-            if market_state.bid and market_state.bid <= lower:
+            if mid_price <= lower:
                 return True
 
         elif trade.direction == Direction.SHORT:
             # exit if price returns inside / above upper band
-            if market_state.bid and market_state.bid >= upper:
+            if mid_price >= upper:
                 return True
 
         return False

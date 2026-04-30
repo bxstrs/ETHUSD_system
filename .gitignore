@@ -42,6 +42,7 @@ notebooks/.ipynb_checkpoints/
 *.ipynb
 logs/
 test-results/
+reports/
 
 # OS
 .DS_Store
@@ -49,7 +50,10 @@ Thumbs.db
 *.bak
 
 # Jupyter Notebook
-notebooks/*
+notebooks
 
 # Copilot Customization
 .claude
+AUDIT*
+COM*
+IMPLEMENT*

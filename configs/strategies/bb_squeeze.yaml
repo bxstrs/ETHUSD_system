@@ -1,7 +1,7 @@
 bb_period: 25
-bb_dev: 1
+bb_dev: 1.0
 bw_ma_period: 150
 atr_period: 20
-constant: 1 
+constant: 1.0 
 adaptive_constant: 0.8
 max_spread: 400

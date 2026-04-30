@@ -87,14 +87,14 @@ class PositionManager:
     # Exit Handler
     # ------------------------------------------------------------------
 
-    def handle_exit(self, strategy, market_state, history) -> None:
+    def handle_exit(self, strategy, market_state) -> None:
         trades = self.get_strategy_positions(
             market_state.symbol,
             strategy.strategy_id
         )
 
         for pos, trade in trades:
-            if strategy.check_exit(trade, market_state, history["close"]):
+            if strategy.check_exit(trade, market_state):
                 exit_price = (
                     market_state.bid
                 )
@@ -106,19 +106,17 @@ class PositionManager:
                 deal_ticket = result.deal
                 deals = self.bridge.history_deals_get(ticket=deal_ticket)
                 actual_pnl = deals[0].profit if deals else None
+                
+                trade.net_pnl = actual_pnl
 
                 datalogger.log_trade(
                     ts=market_state.timestamp,
                     type="EXIT",
                     direction=trade.direction.name,
-                    price=exit_price,
-                    pnl=trade.net_pnl,
+                    price=actual_exit_price,
+                    pnl=actual_pnl,
                     note="exit_signal"
                 )
-
-                trade.exit_price = actual_exit_price
-                trade.exit_time = market_state.timestamp
-                trade.net_pnl = actual_pnl
 
                 self._update_risk(trade)
                 strategy.update_trade_result(trade)
