@@ -65,39 +65,120 @@ class Signal:
 
 
 @dataclass
-class Trade:
-    """A completed or open trade."""
-    # Identifiers
-    symbol: str
-    trade_id: str
-    #signal_id: str
+class TradeSetup:
+    """Signal intent: what triggered entry."""
+    setup_id: str
     strategy_id: str
+    symbol: str
+    timestamp: datetime
 
-    # Order details
     direction: Direction
-    entry_price: float # Filled entry price (slippage included).
+    trigger_price: float
+
+    bb_upper: float
+    bb_lower: float
+    bb_middle: float
+    bandwidth: float
+    bandwidth_ma: float
+    atr: float
+    spread: float
+
+    intended_entry_price: float
+    intended_volume: float
+
+    hour_of_day: int
+    candle_open: float
+    candle_high: float
+    candle_low: float
+    candle_close: float
+    prev_trade_pnl: Optional[float] = None
+    adaptive_filter_active: bool = False
+
+
+@dataclass
+class TradeExecution:
+    """Execution details: what actually filled."""
+    execution_id: str
+    setup_id: str
+
+    filled_entry_price: float
+    filled_volume: float
+    filled_time: datetime
+
+    slippage: float
+    latency_ms: float
+    status: str  # SUCCESS / PARTIAL / FAILED
+
+
+@dataclass
+class TradeResult:
+    """Complete trade lifecycle: entry to exit."""
+    trade_id: str
+    execution_id: str
+    setup_id: str
+    symbol: str
+    direction: Direction
+
+    entry_price: float
     entry_time: datetime
     volume: float
-    status: Optional[TradeStatus] = None
+    entry_slippage: float
+    entry_latency_ms: float
 
-    stop_loss: Optional[float] = None
-    take_profit: Optional[float] = None
     exit_price: Optional[float] = None
     exit_time: Optional[datetime] = None
+    exit_reason: Optional[str] = None
 
-    # Performance metrics (calculated on close)
-    gross_pnl: Optional[float] = None
-    net_pnl: Optional[float] = None
-    commissions: Optional[float] = None
-    slippage: Optional[float] = None
+    exit_bid: Optional[float] = None
+    exit_ask: Optional[float] = None
+
+    gross_pnl: float = 0.0
+    fees: float = 0.0
+    net_pnl: float = 0.0
+
+    duration_minutes: Optional[float] = None
+    risk_reward_ratio: Optional[float] = None
+
+    max_adverse_excursion: Optional[float] = None
+    max_favorable_excursion: Optional[float] = None
+
+    status: str = "OPEN"
 
     def __post_init__(self):
-        """Validate trade."""
+        """Validate trade result."""
         if self.volume <= 0:
-            raise ValueError("Size must be positive")
-        if self.status == TradeStatus.CLOSED:
+            raise ValueError("Volume must be positive")
+        if self.status == "CLOSED":
             if self.exit_price is None or self.exit_time is None:
                 raise ValueError("Closed trades must have exit_price and exit_time")
+
+
+@dataclass
+class PortfolioStats:
+    """Portfolio-level metrics for ML regime detection and adaptive strategies."""
+    timestamp: datetime
+    strategy_id: str
+    symbol: str
+
+    total_trades: int = 0
+    wins: int = 0
+    losses: int = 0
+    consecutive_wins: int = 0
+    consecutive_losses: int = 0
+
+    max_drawdown: float = 0.0
+    current_drawdown: float = 0.0
+    profit_factor: float = 0.0  # Gross Profit / Gross Loss
+
+    avg_win: float = 0.0
+    avg_loss: float = 0.0
+    payoff_ratio: float = 0.0  # Avg Win / Avg Loss
+
+    win_rate: float = 0.0  # wins / total_trades
+    expected_payoff: float = 0.0  # (Avg Win × Win% - Avg Loss × Loss%)
+
+    daily_pnl: float = 0.0
+    cumulative_pnl: float = 0.0
 
 
 @dataclass
@@ -109,7 +190,7 @@ class Prediction:
     symbol: str
 
     probability: float  # 0.00 to 1.00 (likelihood signal is good)
-    decision: bool 
+    decision: bool
     model_name: str
     notes: Optional[str] = None
 
@@ -117,3 +198,31 @@ class Prediction:
         """Validate prediction."""
         if not 0.00 <= self.probability <= 1.00:
             raise ValueError("Probability must be between 0.00 and 1.00")
+
+
+# Deprecated: Use TradeSetup + TradeExecution + TradeResult instead
+# @dataclass
+# class Trade:
+#     """A completed or open trade. [DEPRECATED - use TradeResult]"""
+#     # Identifiers
+#     symbol: str
+#     trade_id: str
+#     strategy_id: str
+#
+#     # Order details
+#     direction: Direction
+#     entry_price: float
+#     entry_time: datetime
+#     volume: float
+#     status: Optional[TradeStatus] = None
+#
+#     stop_loss: Optional[float] = None
+#     take_profit: Optional[float] = None
+#     exit_price: Optional[float] = None
+#     exit_time: Optional[datetime] = None
+#
+#     # Performance metrics
+#     gross_pnl: Optional[float] = None
+#     net_pnl: Optional[float] = None
+#     commissions: Optional[float] = None
+#     slippage: Optional[float] = None
