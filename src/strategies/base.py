@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 
-from src.core.types import Signal, MarketState, Trade
+from src.core.types import Signal, MarketState, TradeExecution, TradeResult
 
 
 class Strategy(ABC):
@@ -32,7 +32,7 @@ class Strategy(ABC):
     @abstractmethod
     def check_exit(
         self,
-        trade: Trade,
+        trade: TradeExecution,
         market_state: MarketState,
         closes: list,
     ) -> bool:
@@ -44,7 +44,7 @@ class Strategy(ABC):
     # -----------------------------
     # State update (after trade closes)
     # -----------------------------
-    def update_trade_result(self, trade: Trade) -> None:
+    def update_trade_result(self, trade: TradeResult) -> None:
         """
         Optional override
         """
