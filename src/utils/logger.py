@@ -4,7 +4,7 @@ import inspect
 import os
 
 LOG_LEVEL = "INFO"  # DEBUG, INFO, ERROR
-levels = ["DEBUG", "INFO", "SIGNAL", "WARNING", "ERROR"]
+levels = ["DEBUG", "INFO", "WARNING", "CRITICAL", "ERROR"]
 
 def log(msg, level="INFO", source=None):
 
