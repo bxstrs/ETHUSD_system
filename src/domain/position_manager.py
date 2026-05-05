@@ -1,22 +1,27 @@
-'''src/execution/position_manager.py'''
+'''src/domain/position_manager.py'''
 from typing import List, Tuple, Dict, Optional
 from datetime import datetime
 
 import MetaTrader5 as mt5
-from src.execution.converter import mt5_position_to_trade_result
+from src.domain.trade_converter import mt5_position_to_trade_result
 from src.core.types import TradeResult, Direction
-from src.utils.logger import log
-from src.utils.data_logger import DataLogger
+from src.infrastructure.logger.logger import log
+from src.infrastructure.logger.data_logger import DataLogger
 from src.config.loader import load_yaml
 
 
 class PositionManager:
     def __init__(self, bridge, datalogger: Optional[DataLogger] = None):
+
+        # Position metadata: ticket → {setup_id, execution_id, trade, mae, mfe}
+        self._position_metadata: Dict[int, Dict] = {}
+        
         self.bridge = bridge
         self.datalogger = datalogger or DataLogger()
 
         # Load risk config
         risk_config = load_yaml("risk.yaml")
+
         self.enable_consecutive_loss_limit = risk_config.get("enable_consecutive_loss_limit", False)
         self.max_consecutive_losses = risk_config.get("max_consecutive_losses", 5)
         self.enable_drawdown_limit = risk_config.get("enable_drawdown_limit", False)
@@ -26,9 +31,6 @@ class PositionManager:
         self._consecutive_losses: int = 0
         self._peak_balance: float = 0.0
         self._trading_halted: bool = False
-
-        # Position metadata: ticket → {setup_id, execution_id, trade, mae, mfe}
-        self._position_metadata: Dict[int, Dict] = {}
 
     # ------------------------------------------------------------------
     # Position Queries

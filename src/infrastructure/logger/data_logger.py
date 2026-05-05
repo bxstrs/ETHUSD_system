@@ -2,8 +2,10 @@
 import csv
 import gzip
 import os
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from collections import defaultdict
+from src.infrastructure.logger.logger import log
 
 
 class DataLogger:
@@ -45,7 +47,7 @@ class DataLogger:
         self.strategy_id = strategy_id
         self.symbol = symbol
 
-        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
         # Filename encodes strategy + symbol for easy filtering and multi-strategy runs
         trade_filename = f"trades_{symbol}_{strategy_id}_{ts}.csv.gz"
@@ -67,15 +69,13 @@ class DataLogger:
 
         # Row cache for partial updates (setup → execution → result)
         self._pending_rows: dict = defaultdict(dict)
-
+        self._row_timestamps: dict = {}  # setup_id -> time.monotonic()
+        self._writes_since_fsync = 0
+        self._fsync_batch_size = 10 
+        
     @classmethod
     def get_instance(cls, base_path="logs", strategy_id: str = "default", symbol: str = "UNKNOWN"):
-        """
-        Get or create singleton instance per (strategy_id, symbol) pair.
-        
-        This ensures only one DataLogger instance per strategy/symbol combination,
-        preventing duplicate CSV files and writer instances.
-        """
+
         key = (strategy_id, symbol)
         if key not in cls._instances:
             cls._instances[key] = cls(base_path, strategy_id, symbol)
@@ -112,6 +112,7 @@ class DataLogger:
 
         # Cache row, don't write yet (wait for execution + result)
         self._pending_rows[setup_id].update(row)
+        self._row_timestamps[setup_id] = time.monotonic()
 
     def log_trade_execution(self, execution) -> None:
         """Log execution details. Row cache updated, still waiting for result."""
@@ -156,11 +157,38 @@ class DataLogger:
         # Write complete row
         self.trade_writer.writerow(complete_row)
         self.trade_file.flush()
-        os.fsync(self.trade_file.fileno())
+        self._writes_since_fsync += 1
+        if self._writes_since_fsync >= self._fsync_batch_size:
+            try:
+                os.fsync(self.trade_file.fileno())
+            except (OSError, ValueError):
+                pass  
+            self._writes_since_fsync = 0
 
         # Clean up cache
-        if setup_id in self._pending_rows:
-            del self._pending_rows[setup_id]
+        self._pending_rows.pop(setup_id, None)
+        self._row_timestamps.pop(setup_id, None)
+    
+    def flush_abandoned_rows(self, timeout_seconds: float = 3600.0) -> int:
+
+        now = time.monotonic()
+        stale_ids = [
+            sid for sid, ts in self._row_timestamps.items()
+            if (now - ts) >= timeout_seconds
+        ]
+ 
+        for setup_id in stale_ids:
+            row = dict(self._pending_rows[setup_id])
+            row.setdefault("trade_status", "CANCELLED")
+            row.setdefault("exit_reason", f"No result received after {timeout_seconds:.0f}s")
+            self.trade_writer.writerow(row)
+            self._pending_rows.pop(setup_id, None)
+            self._row_timestamps.pop(setup_id, None)
+ 
+        if stale_ids:
+            self.trade_file.flush()
+ 
+        return len(stale_ids)
 
     def log_portfolio_stats(self, stats) -> None:
         """Log portfolio-level metrics for ML regime detection."""
@@ -190,25 +218,25 @@ class DataLogger:
         os.fsync(self.portfolio_file.fileno())
 
     def close(self) -> None:
-        """Close all files and flush remaining data to disk."""
-        if self.trade_file:
-            self.trade_file.flush()
-            try:
-                os.fsync(self.trade_file.fileno())
-            except (OSError, ValueError):
-                pass  # File might already be closed or invalid
-            self.trade_file.close()
-        
-        if self.portfolio_file:
-            self.portfolio_file.flush()
-            try:
-                os.fsync(self.portfolio_file.fileno())
-            except (OSError, ValueError):
-                pass  # File might already be closed or invalid
-            self.portfolio_file.close()
-
+        """Flush all pending data (including abandoned rows) and close files."""
+        flushed = self.flush_abandoned_rows(timeout_seconds=0)
+        if flushed:
+            log(f"[DATALOGGER] Flushed {flushed} abandoned row(s) on close", level="WARNING")
+ 
+        for f in (self.trade_file, self.portfolio_file):
+            if f:
+                try:
+                    f.flush()
+                    os.fsync(f.fileno())
+                except (OSError, ValueError):
+                    pass
+                try:
+                    f.close()
+                except (OSError, ValueError):
+                    pass
+ 
     def __enter__(self):
         return self
-
+ 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()

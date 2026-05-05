@@ -1,5 +1,5 @@
 """src/engine/components/warmup.py"""
-from src.utils.logger import log
+from src.infrastructure.logger.logger import log
  
  
 def warmup_strategy(strategy, history: dict) -> None:

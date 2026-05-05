@@ -3,7 +3,7 @@ import time
 import MetaTrader5 as mt5
 from typing import Optional
 
-from src.utils.logger import log
+from src.infrastructure.logger.logger import log
 
 
 class OrderExecutor:
@@ -20,7 +20,7 @@ class OrderExecutor:
 
     def _build_order_request(self, symbol: str, order_type: int, volume: float,
                             price: float, magic: int, comment: str,
-                            position_ticket: int = None) -> dict:
+                            position_ticket: Optional[int] = None) -> dict:
         """
         Build MT5 order request dict.
 

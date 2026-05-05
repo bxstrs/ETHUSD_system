@@ -1,7 +1,7 @@
 '''src/config/loader.py'''
 import yaml
 from pathlib import Path
-from src.utils.logger import log
+from src.infrastructure.logger.logger import log
 
 
 BASE_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "configs"

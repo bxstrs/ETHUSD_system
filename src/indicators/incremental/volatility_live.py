@@ -2,10 +2,9 @@
 import math
 from collections import deque
 from typing import Tuple, Optional
+from src.indicators.base import Indicator
 
-class IncrementalVolatility:
-
-     # Updates only when new candle data arrives, caches results between ticks.
+class IncrementalVolatility(Indicator):
     
     def __init__(self, bb_period: int, bb_dev: float, atr_period: int):
         self.bb_period = bb_period

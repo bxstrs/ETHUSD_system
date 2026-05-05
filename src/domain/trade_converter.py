@@ -1,4 +1,4 @@
-'''src/execution/converter.py'''
+'''src/domain/trade_converter.py'''
 import MetaTrader5 as mt5
 from src.core.types import TradeResult, Direction
 from datetime import datetime, timezone

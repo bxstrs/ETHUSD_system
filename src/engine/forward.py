@@ -12,30 +12,30 @@ Responsibilities (and nothing else):
  
 All heavy logic lives in dedicated modules:
   trading_config  – immutable config dataclass
-  market_feed     – fetch_data / build_market_state
-  warmup          – indicator warm-up replay
+  data_handler    – fetch_data / build_market_state
   entry_handler   – signal → order → logging pipeline
+  warmup          – indicator warm-up replay
 """
 import signal
 import time
 import traceback
  
 from src.engine.components.entry_handler import try_entry
-from src.engine.components.marketstate_builder import build_market_state, fetch_data
-from src.engine.components.trading_config import TradingConfig, load_trading_config
+from src.engine.components.data_fetcher import build_market_state, fetch_data
+from src.engine.trading_config import TradingConfig, load_trading_config
 from src.engine.components.warmup import warmup_strategy
 from src.execution.mt5_bridge import MT5Bridge
-from src.execution.position_manager import PositionManager
+from src.domain.position_manager import PositionManager
 from src.strategies.strategy_loader import load_strategy
-from src.utils.data_logger import DataLogger
-from src.utils.line_notifier import LineNotifier
-from src.utils.logger import log
-from src.utils.state_manager import StateManager
+from src.infrastructure.logger.data_logger import DataLogger
+from src.infrastructure.logger.logger import log
+from src.infrastructure.notifier.line_notifier import LineNotifier
+from src.infrastructure.state.position_storage import PositionStorage
  
  
 # ── Module-level singletons (config is frozen, state_manager is stateless) ───
 _config: TradingConfig = load_trading_config()
-_state_manager: StateManager = StateManager()
+_position_storage: PositionStorage = PositionStorage()
 _should_exit: bool = False
  
  
@@ -60,9 +60,10 @@ def _save_checkpoint(position_manager: PositionManager, strategy) -> None:
     positions = position_manager.get_strategy_positions(
         _config.symbol, strategy.strategy_id
     )
-    _state_manager.save_positions(
+    _position_storage.save_positions(
         [pos for pos, _ in positions],
-        strategy.strategy_id,
+        strategy_id = strategy.strategy_id,
+        metadata = position_manager._position_metadata,
     )
  
  
@@ -76,14 +77,14 @@ def _run_recovery(
     On startup, compare the last checkpoint with live MT5 positions.
     Logs and notifies if any positions appear missing.
     """
-    checkpoint_data = _state_manager.load_positions(strategy.strategy_id)
+    checkpoint_data = _position_storage.load_positions(strategy.strategy_id)
     if checkpoint_data is None:
         return
  
     live_positions = position_manager.get_strategy_positions(
         _config.symbol, strategy.strategy_id
     )
-    recovered = _state_manager.reconcile_positions(
+    recovered = _position_storage.reconcile_positions(
         bridge,
         _config.symbol,
         [pos for pos, _ in live_positions],
@@ -241,12 +242,7 @@ def main_loop(strategy_name: str, notifier: LineNotifier) -> None:
 # ── Restart wrapper ───────────────────────────────────────────────────────────
  
 def run_forward(strategy_name: str = "bb_squeeze") -> None:
-    """
-    Outer restart loop.  Calls main_loop() repeatedly until either:
-      - A clean exit (KeyboardInterrupt or normal return)
-      - max_restart_attempts is reached (if configured)
-    Each crash is logged and notified before the delay between restarts.
-    """
+
     notifier = LineNotifier()
     attempt = 0
  

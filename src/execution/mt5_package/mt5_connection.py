@@ -4,7 +4,7 @@ import time
 import MetaTrader5 as mt5
 from dotenv import load_dotenv
 
-from src.utils.logger import log
+from src.infrastructure.logger.logger import log
 
 load_dotenv()
 

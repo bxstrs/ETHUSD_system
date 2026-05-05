@@ -1,6 +1,6 @@
 """Position sizing based on risk management rules."""
 from src.config.loader import load_yaml
-from src.utils.logger import log
+from src.infrastructure.logger.logger import log
 from typing import Optional
 
 

@@ -17,9 +17,9 @@ from typing import Optional, Tuple
 import MetaTrader5 as mt5
  
 from src.core.types import Direction, MarketState, TradeExecution, TradeSetup
-from src.engine.components.trading_config import TradingConfig
-from src.utils.data_logger import DataLogger
-from src.utils.logger import log
+from src.engine.trading_config import TradingConfig
+from src.infrastructure.logger.data_logger import DataLogger
+from src.infrastructure.logger.logger import log
  
  
 def try_entry(

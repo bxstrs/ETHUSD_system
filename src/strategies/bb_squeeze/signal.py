@@ -9,8 +9,8 @@ from src.indicators.incremental.volatility_live import (
     BandwidthMACalculator
 )
 
-from src.utils.logger import log
-from src.utils.data_logger import DataLogger
+from src.infrastructure.logger.logger import log
+from src.infrastructure.logger.data_logger import DataLogger
 
 
 class BBSqueeze(Strategy):
@@ -79,6 +79,7 @@ class BBSqueeze(Strategy):
             log(f"Spread too high: {spread}")
             return None
 
+        # ── Setup monitoring and expiration logic ───────────────────────
         if self._tracked_setup_bar != setup_bar_time:
             self._tracked_setup_bar = setup_bar_time
             self._entry_window_bar = current_bar_time
@@ -97,7 +98,7 @@ class BBSqueeze(Strategy):
                 )
                 return None
 
-        # ===== USE INCREMENTAL VALUES =====
+        # ===== use incremental values =====
         prev_upper, prev_lower, _ = self.indicators.get_previous_bollinger_bands()
         atr_value = self.indicators.get_atr()
         bandwidth = self.indicators.get_bandwidth()

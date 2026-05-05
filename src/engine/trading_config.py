@@ -1,7 +1,5 @@
 from dataclasses import dataclass
- 
-import MetaTrader5 as mt5
- 
+import MetaTrader5 as mt5 
 from src.config.loader import load_yaml
  
  

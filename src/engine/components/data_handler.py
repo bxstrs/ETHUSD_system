@@ -7,8 +7,8 @@ and so these functions can be tested independently.
 from typing import Optional, Tuple
 
 from src.core.types import MarketState
-from src.engine.components.trading_config import TradingConfig
-from src.utils.logger import log
+from src.engine.trading_config import TradingConfig
+from src.infrastructure.logger.logger import log
 
 
 def fetch_data(
