@@ -42,14 +42,17 @@ notebooks/.ipynb_checkpoints/
 *.ipynb
 logs/
 test-results/
+reports/
+notebooks/
+checkpoints/
 
 # OS
 .DS_Store
 Thumbs.db
 *.bak
 
-# Jupyter Notebook
-notebooks/*
-
 # Copilot Customization
 .claude
+AUDIT*
+COMPREHENSIVE*.md
+IMPLEMENT*.md

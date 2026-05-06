@@ -1,0 +1,145 @@
+'''src/indicators/incremental/volatility_live.py'''
+import math
+from collections import deque
+from typing import Tuple, Optional
+from src.indicators.base import Indicator
+
+class IncrementalVolatility(Indicator):
+    
+    def __init__(self, bb_period: int, bb_dev: float, atr_period: int):
+        self.bb_period = bb_period
+        self.bb_dev = bb_dev
+        self.atr_period = atr_period
+        
+        # Rolling windows
+        self.closes = deque(maxlen=bb_period)
+        self.tr_values = deque(maxlen=atr_period)
+
+        # Running sums for BB and ATR
+        self._sum = 0.0
+        self._sum_sq = 0.0
+        self._tr_sum = 0.0
+        
+        # Cached results
+        self._bb_upper: Optional[float] = None
+        self._bb_lower: Optional[float] = None
+        self._bb_middle: Optional[float] = None
+        self._atr: float = 0.0
+
+        # Previous values for signal generation
+        self._prev_bb_upper: Optional[float] = None
+        self._prev_bb_lower: Optional[float] = None
+        self._prev_bb_middle: Optional[float] = None
+        
+        
+    def update(
+        self,
+        close: float,
+        high: float,
+        low: float,
+        prev_close: float
+    ) -> None:
+        """
+        Update with new tick data.
+            prev_close (required for True Range calculation on first update)
+        """
+        # ===== BOLLINGER UPDATE =====
+        if len(self.closes) == self.bb_period:
+            old = self.closes.popleft()
+            self._sum -= old
+            self._sum_sq -= old * old
+
+        self.closes.append(close)
+        self._sum += close
+        self._sum_sq += close * close
+
+        # ===== TRUE RANGE UPDATE =====
+        tr = max(
+            high - low,
+            abs(high - prev_close),
+            abs(low - prev_close),
+        )
+
+        if len(self.tr_values) == self.atr_period:
+            old_tr = self.tr_values.popleft()
+            self._tr_sum -= old_tr
+
+        self.tr_values.append(tr)
+        self._tr_sum += tr
+        
+        # ===== RECALCULATE (O(1)) =====
+        self._recalculate()
+    
+    def _recalculate(self) -> None:
+        """Recalculate BB and ATR using running sums."""
+
+        # ---- SHIFT CURRENT → PREVIOUS ----
+        self._prev_bb_upper = self._bb_upper
+        self._prev_bb_lower = self._bb_lower
+        self._prev_bb_middle = self._bb_middle
+
+        # ---- Bollinger Bands (CURRENT) ----
+        n = len(self.closes)
+        if n < self.bb_period:
+            self._bb_upper = None
+            self._bb_lower = None
+            self._bb_middle = None
+        else:
+            mean = self._sum / n
+            variance = (self._sum_sq / n) - (mean * mean)
+            variance = max(variance, 0.0)
+            std = math.sqrt(variance)
+
+            self._bb_middle = mean
+            self._bb_upper = mean + self.bb_dev * std
+            self._bb_lower = mean - self.bb_dev * std
+
+        # ---- ATR ----
+        m = len(self.tr_values)
+        self._atr = self._tr_sum / m if m > 0 else 0.0
+    
+     # ===== GETTERS =====
+    
+    def get_bollinger_bands(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        return self._bb_upper, self._bb_lower, self._bb_middle
+
+    def get_previous_bollinger_bands(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        return self._prev_bb_upper, self._prev_bb_lower, self._prev_bb_middle
+
+    def get_atr(self) -> float:
+        return self._atr
+
+    def get_bandwidth(self) -> float:
+        if (
+            self._bb_middle is None
+            or self._bb_upper is None
+            or self._bb_lower is None
+            or self._bb_middle == 0
+        ):
+            return 0.0
+        return (self._bb_upper - self._bb_lower) / self._bb_middle
+
+    def is_ready(self) -> bool:
+        return len(self.closes) >= self.bb_period and len(self.tr_values) > 0
+
+class BandwidthMACalculator:
+    def __init__(self, bw_ma_period: int = 150):
+        self.bw_ma_period = bw_ma_period
+        self.values = deque(maxlen=bw_ma_period)
+        self._sum = 0.0
+
+    def update(self, value: float) -> None:
+        if len(self.values) == self.bw_ma_period:
+            old = self.values.popleft()
+            self._sum -= old
+
+        self.values.append(value)
+        self._sum += value
+
+    def get_bandwidth_ma(self) -> float:
+        if len(self.values) == 0:
+            return 0.0
+        return self._sum / len(self.values)
+
+    def is_ready(self) -> bool:
+        return len(self.values) >= self.bw_ma_period

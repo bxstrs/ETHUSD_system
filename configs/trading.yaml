@@ -1,0 +1,19 @@
+# Trading Configuration
+symbol: "ETHUSD#"
+timeframe: "H4"        # H1, H4, D1, etc
+timeframe_value: 16388 # mt5.TIMEFRAME_H4 (DO NOT CHANGE unless you know MT5 constants)
+
+# Order Execution
+deviation: 3        # Slippage tolerance in points
+
+# Risk & Position Sizing
+base_volume: 0.1       # Default position size (can be overridden by position sizer)
+
+# Loop Timing
+tick_sleep_ms: 100           # Sleep between ticks (milliseconds)
+rate_fetch_interval_s: 1     # Fetch full history every N seconds
+checkpoint_interval_ticks: 100  # Save state every N ticks
+
+# Restart Behavior
+restart_delay_seconds: 10
+max_restart_attempts: -1     # -1 = unlimited

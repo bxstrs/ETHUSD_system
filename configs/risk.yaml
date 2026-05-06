@@ -1,3 +1,9 @@
 risk_per_trade: 0.025
-max_drawdown: 0.2
+
+# Risk Limits - set enable_* to false to disable for ML data gathering
+enable_consecutive_loss_limit: false
+enable_drawdown_limit: false
+
 max_consecutive_losses: 5
+max_drawdown: 0.2
+

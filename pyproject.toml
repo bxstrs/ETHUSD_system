@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ETHUSD_system"
+version = "0.1.0"
+description = "My MT5 trading system"
+requires-python = ">=3.10"
+
+dependencies = [
+    "numpy",
+    "pandas",
+    "metatrader5",
+    "requests",
+    "websockets",
+    "python-dotenv",
+    "PyYAML",
+    "loguru"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest"
+]
