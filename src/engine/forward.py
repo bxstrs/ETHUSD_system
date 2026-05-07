@@ -20,6 +20,7 @@ import signal
 import time
 import traceback
  
+from src.core.exceptions import MarketDataUnavailable
 from src.engine.components.entry_handler import try_entry
 from src.engine.components.data_handler import build_market_state, fetch_data
 from src.engine.trading_config import TradingConfig, load_trading_config
@@ -106,13 +107,11 @@ def main_loop(strategy_name: str, notifier: LineNotifier) -> None:
  
             # ── Market data refresh ───────────────────────────────────
             if time.time() - last_fetch_time > _trading_config.rate_fetch_interval:
+
                 history, tick = fetch_data(bridge, _trading_config)
-                if history is None or tick is None:
-                    log("Failed to fetch market data, retrying...", level="WARNING")
-                    time.sleep(_trading_config.tick_sleep)
-                    continue
                 current_bar_time = history["timestamp"][-1]
                 last_fetch_time = time.time()
+
                 if tick_counter % 100 == 0:
                     log(
                         f"[TICK {tick_counter}] Bar: {current_bar_time}, "
@@ -121,10 +120,12 @@ def main_loop(strategy_name: str, notifier: LineNotifier) -> None:
                     )
             else:
                 tick = bridge.get_tick(_trading_config.symbol)
+
                 if tick is None:
                     log(f"[TICK {tick_counter}] Failed to fetch tick data", level="ERROR")
                     time.sleep(_trading_config.tick_sleep)
                     continue
+
                 if tick_counter % 100 == 0:
                     log(
                         f"[TICK {tick_counter}] Bid: {tick.bid:.5f}, Ask: {tick.ask:.5f}",
@@ -168,12 +169,20 @@ def main_loop(strategy_name: str, notifier: LineNotifier) -> None:
  
     except KeyboardInterrupt:
         log("Stopped by user", level="INFO")
+
+    except MarketDataUnavailable as exc:
+        message = f"Market data unavailable: {exc}"
+        log(message, level="ERROR")
+        _notify(notifier, message)
+        raise
+
     except Exception as exc:
         message = f"Unhandled exception in forward loop: {exc}"
         log(message, level="ERROR")
         _notify(notifier, message)
         traceback.print_exc()
         raise
+
     finally:
         log("Graceful shutdown: saving state and closing resources", level="INFO")
         _save_checkpoint(position_manager, strategy)

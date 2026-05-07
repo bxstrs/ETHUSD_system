@@ -4,9 +4,11 @@ Handles all market data retrieval and construction of MarketState objects.
 Isolated here so the main loop stays free of data-plumbing details,
 and so these functions can be tested independently.
 """
+import time
 from typing import Optional, Tuple
 
-from src.core.types import MarketState
+from src.core.types import MarketState, TickData
+from src.core.exceptions import MarketDataUnavailable
 from src.engine.trading_config import TradingConfig
 from src.infrastructure.logger.logger import log
 
@@ -14,23 +16,36 @@ from src.infrastructure.logger.logger import log
 def fetch_data(
     bridge,
     config: TradingConfig,
-    n_bars: int = 220,
-) -> Tuple[Optional[dict], Optional[object]]:
+) -> Tuple[dict, TickData]:
 
-    try:
-        bridge.ensure_connected()
-    except Exception as exc:
-        log(f"Connection error: {exc}", level="ERROR")
-        return None, None
+    for attempt in range(config.max_fetch_attempts):
 
-    history = bridge.get_rates(config.symbol, config.timeframe_value, n_bars)
-    tick = bridge.get_tick(config.symbol)
+        try:
+            bridge.ensure_connected()
+            history = bridge.get_rates(config.symbol, config.timeframe_value, config.bar_lookback)
+            raw_tick = bridge.get_tick(config.symbol)
+            
+            tick = TickData(
+                bid=raw_tick.bid,
+                ask=raw_tick.ask,
+                last=raw_tick.last,
+                volume=raw_tick.volume,
+                time=raw_tick.time
+            )
 
-    if history is None or tick is None:
-        log("Market data fetch returned invalid response", level="WARNING")
-        return None, None
+            if history is not None and tick is not None:
+                return history, tick
+        
+            log(f"Failed to fetch market data "f"({attempt + 1}/{config.max_fetch_attempts})",level="WARNING")
 
-    return history, tick
+        except Exception as exc:
+            log(f"Connection error: {exc}", level="ERROR")
+
+        time.sleep(config.tick_sleep)
+
+    raise MarketDataUnavailable(
+        f"Failed after {config.max_fetch_attempts} attempts"
+    )
 
 
 def build_market_state(

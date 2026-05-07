@@ -28,6 +28,13 @@ class TradeStatus(str, Enum):
     CLOSED = "CLOSED"
     CANCELLED = "CANCELLED"
 
+@dataclass(slots=True)
+class TickData:
+    bid: float
+    ask: float
+    last: float
+    volume: int
+    time: int
 
 @dataclass
 class MarketState:

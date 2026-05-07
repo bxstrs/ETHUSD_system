@@ -1,0 +1,3 @@
+
+class MarketDataUnavailable(Exception):
+    pass
