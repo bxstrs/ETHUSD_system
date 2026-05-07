@@ -1,21 +1,4 @@
-"""src/engine/forward.py
- 
-Top-level orchestrator for the live forward-trading loop.
- 
-Responsibilities (and nothing else):
-  - Register OS signal handlers for graceful shutdown
-  - Bootstrap MT5, strategy, logger, and position manager
-  - Run crash-recovery reconciliation on startup
-  - Drive the tick loop: data refresh → exit check → entry attempt
-  - Periodic checkpointing and graceful shutdown
-  - Outer restart loop with exponential-backoff in run_forward()
- 
-All heavy logic lives in dedicated modules:
-  trading_trading_config  – immutable config dataclass
-  data_handler    – fetch_data / build_market_state
-  entry_handler   – signal → order → logging pipeline
-  warmup          – indicator warm-up replay
-"""
+"""src/engine/forward.py"""
 import signal
 import time
 import traceback
@@ -72,17 +55,11 @@ def main_loop(strategy_name: str, notifier: LineNotifier) -> None:
     datalogger = DataLogger(strategy_id=strategy.strategy_id, symbol=_trading_config.symbol)
     position_manager = PositionManager(bridge, datalogger=datalogger)
     risk_manager = RiskManager()
- 
+    
+    history, tick = fetch_data(bridge, _trading_config)
+
     log(f"Loaded strategy: {strategy.strategy_id}")
     _run_recovery(bridge, position_manager, strategy)
- 
-    history, tick = fetch_data(bridge, _trading_config)
-    if history is None:
-        message = "Initial market data fetch failed"
-        log(message, level="ERROR")
-        _notify(notifier, message)
-        raise RuntimeError(message)
- 
     warmup_strategy(strategy, history)
  
     # ── Loop state ────────────────────────────────────────────────────
@@ -112,31 +89,13 @@ def main_loop(strategy_name: str, notifier: LineNotifier) -> None:
                 current_bar_time = history["timestamp"][-1]
                 last_fetch_time = time.time()
 
-                if tick_counter % 100 == 0:
-                    log(
-                        f"[TICK {tick_counter}] Bar: {current_bar_time}, "
-                        f"Bid: {tick.bid:.5f}, Ask: {tick.ask:.5f}",
-                        level="INFO",
-                    )
+                _heartbeat_logger(tick_counter, tick, current_bar_time)
+
             else:
                 tick = bridge.get_tick(_trading_config.symbol)
 
-                if tick is None:
-                    log(f"[TICK {tick_counter}] Failed to fetch tick data", level="ERROR")
-                    time.sleep(_trading_config.tick_sleep)
-                    continue
+                _heartbeat_logger(tick_counter, tick, current_bar_time)
 
-                if tick_counter % 100 == 0:
-                    log(
-                        f"[TICK {tick_counter}] Bid: {tick.bid:.5f}, Ask: {tick.ask:.5f}",
-                        level="INFO",
-                    )
- 
-            if history is None:
-                log("[DATA ERROR] history is None, skipping iteration", level="ERROR")
-                time.sleep(_trading_config.tick_sleep)
-                continue
- 
             # ── Exit check ────────────────────────────────────────────
             current_state = build_market_state(history, tick, _trading_config, use_previous=False)
             position_manager.handle_exit(strategy, current_state)
@@ -235,7 +194,6 @@ def _notify(notifier: LineNotifier, message: str) -> None:
     if notifier and notifier.enabled:
         notifier.notify(message)
  
- 
 def _save_checkpoint(position_manager: PositionManager, strategy) -> None:
     """Persist current open positions to disk for crash recovery."""
     positions = position_manager.get_strategy_positions(
@@ -246,7 +204,6 @@ def _save_checkpoint(position_manager: PositionManager, strategy) -> None:
         strategy_id = strategy.strategy_id,
         metadata = position_manager.export_metadata(),
     )
- 
  
 def _run_recovery(
     bridge,
@@ -268,4 +225,22 @@ def _run_recovery(
         checkpoint_data,
         _position_storage
     )
+
+def _heartbeat_logger(counter, tick, current_bar_time=None):
+
+    if counter % 100 != 0:
+        return
+
+    if current_bar_time:
+        log(
+            f"[TICK {counter}] Bar: {current_bar_time}, "
+            f"Bid: {tick.bid:.5f}, Ask: {tick.ask:.5f}",
+            level="INFO",
+        )
+    else:
+        log(
+            f"[TICK {counter}] "
+            f"Bid: {tick.bid:.5f}, Ask: {tick.ask:.5f}",
+            level="INFO",
+        )
  

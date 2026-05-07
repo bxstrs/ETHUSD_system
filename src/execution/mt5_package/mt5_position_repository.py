@@ -17,15 +17,13 @@ class PositionRepository:
     def get_positions(self, symbol: str):
         """Fetch all open positions for a symbol."""
         if not self.connection_manager.ensure_connected():
-            log(f"Cannot fetch positions: not connected", level="ERROR")
-            return None
+            raise ConnectionError("Not connected to MT5")
 
         return mt5.positions_get(symbol=symbol)
 
     def history_deals_get(self, ticket):
         """Fetch deal history for a position ticket."""
         if not self.connection_manager.ensure_connected():
-            log(f"Cannot fetch deals: not connected", level="ERROR")
-            return None
+            raise ConnectionError("Not connected to MT5")
 
         return mt5.history_deals_get(ticket=ticket)

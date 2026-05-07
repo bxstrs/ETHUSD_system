@@ -30,6 +30,7 @@ class TradeStatus(str, Enum):
 
 @dataclass(slots=True)
 class TickData:
+    symbol: str
     bid: float
     ask: float
     last: float

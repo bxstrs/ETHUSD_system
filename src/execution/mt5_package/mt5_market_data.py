@@ -2,6 +2,8 @@
 import MetaTrader5 as mt5
 from typing import Dict, Optional
 
+from src.core.types import TickData
+from src.core.exceptions import RateFetchError, TickFetchError
 from src.infrastructure.logger.logger import log
 
 
@@ -18,13 +20,12 @@ class MarketDataFetcher:
     def get_rates(self, symbol: str, timeframe, n: int = 180) -> Optional[Dict]:
         """Fetch historical rates (bars/candles)."""
         if not self.connection_manager.ensure_connected():
-            log(f"Cannot fetch rates: not connected", level="ERROR")
-            return None
+            raise ConnectionError("Not connected to MT5")
 
         rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, n)
+
         if rates is None:
-            log(f"Failed to fetch rates for {symbol}", level="WARNING")
-            return None
+            raise RateFetchError(f"Failed to fetch rates for {symbol} on timeframe {timeframe}")
 
         return {
             "open": [r["open"] for r in rates],
@@ -35,19 +36,31 @@ class MarketDataFetcher:
         }
 
     def get_tick(self, symbol: str):
+
         """Fetch current tick (bid/ask)."""
         if not self.connection_manager.ensure_connected():
-            log(f"Cannot fetch tick: not connected", level="ERROR")
-            return None
-
-        return mt5.symbol_info_tick(symbol)
+            raise ConnectionError("Not connected to MT5")
+        
+        raw_tick = mt5.symbol_info_tick(symbol)
+        
+        if raw_tick is None:
+            raise TickFetchError(f"Failed to fetch tick for {symbol}")
+        
+        return TickData(
+            symbol=symbol,
+            bid=raw_tick.bid,
+            ask=raw_tick.ask,
+            last=raw_tick.last,
+            volume=raw_tick.volume,
+            time=raw_tick.time
+        )
 
     def get_spread(self, symbol: str) -> float:
         """Calculate spread in points."""
         tick = self.get_tick(symbol)
         info = mt5.symbol_info(symbol)
 
-        if not tick or not info or not tick.ask or not tick.bid or info.point == 0:
+        if info is None or info.point == 0:
             return float("inf")
 
         return (tick.ask - tick.bid) / info.point

@@ -73,9 +73,6 @@ class PositionManager:
     def export_metadata(self):
         return dict(self._position_metadata)
 
-    def import_metadata(self, metadata):
-        self._position_metadata = {int(k): v for k, v in metadata.items()}
-
     def remove_metadata(self, ticket: int):
         if ticket in self._position_metadata:
             del self._position_metadata[ticket]

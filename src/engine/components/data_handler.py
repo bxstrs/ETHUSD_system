@@ -23,23 +23,16 @@ def fetch_data(
         try:
             bridge.ensure_connected()
             history = bridge.get_rates(config.symbol, config.timeframe_value, config.bar_lookback)
-            raw_tick = bridge.get_tick(config.symbol)
-            
-            tick = TickData(
-                bid=raw_tick.bid,
-                ask=raw_tick.ask,
-                last=raw_tick.last,
-                volume=raw_tick.volume,
-                time=raw_tick.time
-            )
+            tick = bridge.get_tick(config.symbol)
 
-            if history is not None and tick is not None:
-                return history, tick
+            return history, tick
         
-            log(f"Failed to fetch market data "f"({attempt + 1}/{config.max_fetch_attempts})",level="WARNING")
-
-        except Exception as exc:
-            log(f"Connection error: {exc}", level="ERROR")
+        except MarketDataUnavailable as exc:
+            log(
+                f"Market data fetch failed "
+                f"({attempt + 1}/{config.max_fetch_attempts}): {exc}",
+                level="WARNING",
+            )
 
         time.sleep(config.tick_sleep)
 

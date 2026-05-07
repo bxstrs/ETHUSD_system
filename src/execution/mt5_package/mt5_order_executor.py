@@ -75,10 +75,6 @@ class OrderExecutor:
 
         tick = self.market_data_fetcher.get_tick(symbol)
 
-        if tick is None:
-            log(f"Failed to get tick for {symbol}", level="ERROR")
-            return None
-
         if direction == "BUY":
             order_type = mt5.ORDER_TYPE_BUY
             price = tick.ask
@@ -128,16 +124,14 @@ class OrderExecutor:
         return None
 
     def close_position(self, position):
+
         """Close an open position."""
         tick = self.market_data_fetcher.get_tick(position.symbol)
-
-        if tick is None:
-            log(f"Failed to get tick for {position.symbol}", level="ERROR")
-            return None
 
         if position.type == mt5.POSITION_TYPE_BUY:
             order_type = mt5.ORDER_TYPE_SELL
             price = tick.bid
+
         else:
             order_type = mt5.ORDER_TYPE_BUY
             price = tick.ask
