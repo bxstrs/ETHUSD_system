@@ -96,11 +96,11 @@ class PositionManager:
                 "recovered": True,
             }
     
-    def reconcile(self, mt5_positions, checkpoint_data, storage):
+    def reconcile(self, mt5_positions, checkpoint_data, position_storage):
         if not checkpoint_data:
             return
 
-        result = storage.check_positions(mt5_positions, checkpoint_data)
+        result = position_storage.check_positions(mt5_positions, checkpoint_data)
 
         for ticket in result["closed"]:
             self.remove_metadata(ticket)

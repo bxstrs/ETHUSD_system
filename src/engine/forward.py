@@ -11,7 +11,7 @@ Responsibilities (and nothing else):
   - Outer restart loop with exponential-backoff in run_forward()
  
 All heavy logic lives in dedicated modules:
-  trading_config  – immutable config dataclass
+  trading_trading_config  – immutable config dataclass
   data_handler    – fetch_data / build_market_state
   entry_handler   – signal → order → logging pipeline
   warmup          – indicator warm-up replay
@@ -34,8 +34,8 @@ from src.infrastructure.notifier.line_notifier import LineNotifier
 from src.infrastructure.state.position_storage import PositionStorage
  
  
-# ── Module-level singletons (config is frozen, state_manager is stateless) ───
-_config: TradingConfig = load_trading_config()
+# ── Module-level singletons (config is frozen, position_storage is stateless) ───
+_trading_config: TradingConfig = load_trading_config()
 _position_storage: PositionStorage = PositionStorage()
 _should_exit: bool = False
  
@@ -46,49 +46,6 @@ def _signal_handler(signum, frame) -> None:
     global _should_exit
     _should_exit = True
     log(f"Received shutdown signal ({signum})", level="INFO")
- 
- 
-# ── Private helpers ───────────────────────────────────────────────────────────
- 
-def _notify(notifier: LineNotifier, message: str) -> None:
-    """Send a LINE notification if the notifier is configured."""
-    if notifier and notifier.enabled:
-        notifier.notify(message)
- 
- 
-def _save_checkpoint(position_manager: PositionManager, strategy) -> None:
-    """Persist current open positions to disk for crash recovery."""
-    positions = position_manager.get_strategy_positions(
-        _config.symbol, strategy.strategy_id
-    )
-    _position_storage.save_positions(
-        [pos for pos, _ in positions],
-        strategy_id = strategy.strategy_id,
-        metadata = position_manager.export_metadata(),
-    )
- 
- 
-def _run_recovery(
-    bridge,
-    position_manager: PositionManager,
-    strategy,
-) -> None:
-    checkpoint_data = _position_storage.load_positions(strategy.strategy_id)
-
-    if not checkpoint_data:
-        return
-
-    # restore metadata
-    position_manager.load_metadata(checkpoint_data.get("metadata", {}))
-
-    live_positions = bridge.get_positions(_config.symbol)
-
-    position_manager.reconcile(
-        live_positions,
-        checkpoint_data,
-        _position_storage
-    )
- 
  
 # ── Core loop ─────────────────────────────────────────────────────────────────
  
@@ -111,13 +68,14 @@ def main_loop(strategy_name: str, notifier: LineNotifier) -> None:
         raise
  
     strategy = load_strategy(strategy_name)
-    datalogger = DataLogger(strategy_id=strategy.strategy_id, symbol=_config.symbol)
+    datalogger = DataLogger(strategy_id=strategy.strategy_id, symbol=_trading_config.symbol)
     position_manager = PositionManager(bridge, datalogger=datalogger)
+    risk_manager = RiskManager()
  
     log(f"Loaded strategy: {strategy.strategy_id}")
     _run_recovery(bridge, position_manager, strategy)
  
-    history, tick = fetch_data(bridge, _config)
+    history, tick = fetch_data(bridge, _trading_config)
     if history is None:
         message = "Initial market data fetch failed"
         log(message, level="ERROR")
@@ -133,7 +91,7 @@ def main_loop(strategy_name: str, notifier: LineNotifier) -> None:
     current_bar_time = history["timestamp"][-1]
     last_fetch_time = time.time()
     loop_start = time.time()
-    had_position = position_manager.has_open_position(_config.symbol, strategy.strategy_id)
+    had_position = position_manager.has_open_position(_trading_config.symbol, strategy.strategy_id)
  
     try:
         while not _should_exit:
@@ -142,16 +100,16 @@ def main_loop(strategy_name: str, notifier: LineNotifier) -> None:
             iteration_start = time.time()
  
             # ── Periodic checkpoint ───────────────────────────────────
-            if ticks_since_checkpoint >= _config.checkpoint_interval:
+            if ticks_since_checkpoint >= _trading_config.checkpoint_interval:
                 _save_checkpoint(position_manager, strategy)
                 ticks_since_checkpoint = 0
  
             # ── Market data refresh ───────────────────────────────────
-            if time.time() - last_fetch_time > _config.rate_fetch_interval:
-                history, tick = fetch_data(bridge, _config)
+            if time.time() - last_fetch_time > _trading_config.rate_fetch_interval:
+                history, tick = fetch_data(bridge, _trading_config)
                 if history is None or tick is None:
                     log("Failed to fetch market data, retrying...", level="WARNING")
-                    time.sleep(_config.tick_sleep)
+                    time.sleep(_trading_config.tick_sleep)
                     continue
                 current_bar_time = history["timestamp"][-1]
                 last_fetch_time = time.time()
@@ -162,10 +120,10 @@ def main_loop(strategy_name: str, notifier: LineNotifier) -> None:
                         level="INFO",
                     )
             else:
-                tick = bridge.get_tick(_config.symbol)
+                tick = bridge.get_tick(_trading_config.symbol)
                 if tick is None:
                     log(f"[TICK {tick_counter}] Failed to fetch tick data", level="ERROR")
-                    time.sleep(_config.tick_sleep)
+                    time.sleep(_trading_config.tick_sleep)
                     continue
                 if tick_counter % 100 == 0:
                     log(
@@ -175,15 +133,15 @@ def main_loop(strategy_name: str, notifier: LineNotifier) -> None:
  
             if history is None:
                 log("[DATA ERROR] history is None, skipping iteration", level="ERROR")
-                time.sleep(_config.tick_sleep)
+                time.sleep(_trading_config.tick_sleep)
                 continue
  
             # ── Exit check ────────────────────────────────────────────
-            current_state = build_market_state(history, tick, _config, use_previous=False)
+            current_state = build_market_state(history, tick, _trading_config, use_previous=False)
             position_manager.handle_exit(strategy, current_state)
  
             current_has_position = position_manager.has_open_position(
-                _config.symbol, strategy.strategy_id
+                _trading_config.symbol, strategy.strategy_id
             )
             if had_position and not current_has_position:
                 log("[POSITION CLOSED] Blocking re-entry for current bar.", level="INFO")
@@ -192,22 +150,21 @@ def main_loop(strategy_name: str, notifier: LineNotifier) -> None:
             had_position = current_has_position
  
             # ── Entry attempt ─────────────────────────────────────────
-            setup_state = build_market_state(history, tick, _config, use_previous=True)
-            spread = bridge.get_spread(_config.symbol)
-            risk_manager = RiskManager()
+            setup_state = build_market_state(history, tick, _trading_config, use_previous=True)
+            spread = bridge.get_spread(_trading_config.symbol)
  
             executed, last_entry_bar_time = try_entry(
                 bridge, position_manager, risk_manager, strategy,
                 setup_state, history, spread,
                 current_bar_time, last_entry_bar_time,
-                datalogger, _config,
+                datalogger, _trading_config,
             )
  
             if executed:
                 had_position = True
                 log(f"Signal executed in {time.time() - iteration_start:.3f}s")
  
-            time.sleep(_config.tick_sleep)
+            time.sleep(_trading_config.tick_sleep)
  
     except KeyboardInterrupt:
         log("Stopped by user", level="INFO")
@@ -237,7 +194,7 @@ def run_forward(strategy_name: str = "bb_squeeze") -> None:
     notifier = LineNotifier()
     attempt = 0
  
-    while _config.max_restart_attempts < 0 or attempt < _config.max_restart_attempts:
+    while _trading_config.max_restart_attempts < 0 or attempt < _trading_config.max_restart_attempts:
         attempt += 1
         try:
             main_loop(strategy_name, notifier)
@@ -248,16 +205,58 @@ def run_forward(strategy_name: str = "bb_squeeze") -> None:
         except Exception as exc:
             message = (
                 f"Forward runner crashed on attempt {attempt}: {exc}. "
-                f"Restarting in {_config.restart_delay}s."
+                f"Restarting in {_trading_config.restart_delay}s."
             )
             log(message, level="ERROR")
             _notify(notifier, message)
             traceback.print_exc()
  
-            if _config.max_restart_attempts >= 0 and attempt >= _config.max_restart_attempts:
+            if _trading_config.max_restart_attempts >= 0 and attempt >= _trading_config.max_restart_attempts:
                 log("Reached max restart attempts, exiting", level="ERROR")
                 break
  
-            time.sleep(_config.restart_delay)
+            time.sleep(_trading_config.restart_delay)
  
     log("Forward runner exiting", level="INFO")
+
+# ── Private helpers ───────────────────────────────────────────────────────────
+ 
+def _notify(notifier: LineNotifier, message: str) -> None:
+    """Send a LINE notification if the notifier is configured."""
+    if notifier and notifier.enabled:
+        notifier.notify(message)
+ 
+ 
+def _save_checkpoint(position_manager: PositionManager, strategy) -> None:
+    """Persist current open positions to disk for crash recovery."""
+    positions = position_manager.get_strategy_positions(
+        _trading_config.symbol, strategy.strategy_id
+    )
+    _position_storage.save_positions(
+        [pos for pos, _ in positions],
+        strategy_id = strategy.strategy_id,
+        metadata = position_manager.export_metadata(),
+    )
+ 
+ 
+def _run_recovery(
+    bridge,
+    position_manager: PositionManager,
+    strategy,
+) -> None:
+    checkpoint_data = _position_storage.load_positions(strategy.strategy_id)
+
+    if not checkpoint_data:
+        return
+
+    # restore metadata
+    position_manager.load_metadata(checkpoint_data.get("metadata", {}))
+
+    live_positions = bridge.get_positions(_trading_config.symbol)
+
+    position_manager.reconcile(
+        live_positions,
+        checkpoint_data,
+        _position_storage
+    )
+ 
