@@ -26,6 +26,7 @@ from src.engine.trading_config import TradingConfig, load_trading_config
 from src.engine.components.warmup import warmup_strategy
 from src.execution.mt5_bridge import MT5Bridge
 from src.domain.position_manager import PositionManager
+from src.domain.risk_manager import RiskManager
 from src.strategies.strategy_loader import load_strategy
 from src.infrastructure.logger.data_logger import DataLogger
 from src.infrastructure.logger.logger import log
@@ -193,9 +194,10 @@ def main_loop(strategy_name: str, notifier: LineNotifier) -> None:
             # ── Entry attempt ─────────────────────────────────────────
             setup_state = build_market_state(history, tick, _config, use_previous=True)
             spread = bridge.get_spread(_config.symbol)
+            risk_manager = RiskManager()
  
             executed, last_entry_bar_time = try_entry(
-                bridge, position_manager, strategy,
+                bridge, position_manager, risk_manager, strategy,
                 setup_state, history, spread,
                 current_bar_time, last_entry_bar_time,
                 datalogger, _config,

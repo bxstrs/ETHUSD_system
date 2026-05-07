@@ -2,10 +2,11 @@ from src.config.loader import load_yaml
 from src.infrastructure.logger.logger import log
 from src.core.types import TradeResult
 
+risk_config = load_yaml("risk.yaml")
+
 class RiskManager:
 
-    def __init__ (self, config: dict):
-
+    def __init__ (self, config: dict = risk_config):
 
         self.enable_consecutive_loss_limit = config.get("enable_consecutive_loss_limit", False)
         self.max_consecutive_losses = config.get("max_consecutive_losses", 5)

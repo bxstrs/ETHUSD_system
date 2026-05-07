@@ -25,6 +25,7 @@ from src.infrastructure.logger.logger import log
 def try_entry(
     bridge,
     position_manager,
+    risk_manager,
     strategy,
     market_state: MarketState,
     history: dict,
@@ -36,7 +37,7 @@ def try_entry(
 ) -> Tuple[bool, object]:
 
     # ── Pre-entry guards ──────────────────────────────────────────────
-    if not position_manager.can_trade():
+    if not risk_manager.can_trade():
         return False, last_entry_bar_time
  
     if position_manager.has_open_position(config.symbol, strategy.strategy_id):
@@ -87,7 +88,7 @@ def try_entry(
         candle_low=market_state.low,
         candle_close=market_state.close,
         prev_trade_pnl=None,
-        adaptive_filter_active=False,
+        adaptive_filter_active=indicator_values.get("adaptive_filter_active", False),
     )
     datalogger.log_trade_setup(setup)
  
@@ -140,10 +141,10 @@ def try_entry(
  
 def _get_indicator_values(strategy) -> dict:
     """Safely retrieve indicator snapshot from strategy, return {} on failure."""
-    if not hasattr(strategy, "get_indicator_values"):
+    if not hasattr(strategy, "expose_indicator_values"):
         return {}
     try:
-        return strategy.get_indicator_values() or {}
+        return strategy.expose_indicator_values() or {}
     except Exception as exc:
         log(f"Failed to fetch strategy indicator values: {exc}", level="WARNING")
         return {}

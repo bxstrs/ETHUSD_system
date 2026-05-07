@@ -1,5 +1,4 @@
 '''src/domain/position_manager.py'''
-from operator import pos
 from typing import List, Tuple, Dict, Optional
 from datetime import datetime
 
@@ -37,9 +36,6 @@ class PositionManager:
         result = []
         for pos in positions:
             match = pos.comment == str(strategy_id)
-            if pos.ticket not in self._position_metadata:
-                self.ensure_metadata(pos)
-
             log(
                 f"[POSITION] ticket={pos.ticket} | "
                 f"raw_comment='{pos.comment}' | "
