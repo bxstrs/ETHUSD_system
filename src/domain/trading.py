@@ -75,22 +75,14 @@ class TradeExecution:
 class TradeResult:
     position_id:            str
     symbol:                 str
-    direction:              Direction
-
-    entry_price:            float
-    entry_time:             datetime
     volume:                 float
-    entry_slippage:         float
-    entry_latency_ms:       float
-
     exit_price:             float | None    = None
     exit_time:              datetime | None = None
     exit_reason:            str | None      = None
     exit_bid:               float | None    = None
     exit_ask:               float | None    = None
 
-    gross_pnl:              float = 0.0
-    fees:                   float = 0.0
+    total_fees:             float = 0.0
     net_pnl:                float = 0.0
 
     duration_minutes:       float | None    = None

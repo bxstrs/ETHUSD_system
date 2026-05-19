@@ -12,14 +12,14 @@ Extracted from forward.py so the logic can be read, tested, and modified
 without touching the main loop orchestration.
 """
 import uuid
-from typing import Optional, Tuple
- 
-import MetaTrader5 as mt5
- 
-from src.core.types import Direction, MarketState, TradeExecution, TradeSetup
-from src.engine.trading_config import TradingConfig
-from src.infrastructure.logger.data_logger import DataLogger
-from src.infrastructure.logger.logger import log
+from datetime   import datetime, timezone
+
+from src.domain.enums                       import Direction, ExecutionStatus
+from src.domain.market_data                 import MarketSnapshot
+from src.domain.trading                     import TradeExecution, TradeSetup
+from src.engine.components.trading_config   import TradingConfig
+from src.infrastructure.logger.data_logger  import DataLogger
+from src.infrastructure.logger.logger       import log
  
  
 def try_entry(
@@ -27,115 +27,112 @@ def try_entry(
     position_manager,
     risk_manager,
     strategy,
-    market_state: MarketState,
-    history: dict,
+    snapshot: MarketSnapshot,
     spread: float,
-    current_bar_time,
-    last_entry_bar_time,
     datalogger: DataLogger,
     config: TradingConfig,
-) -> Tuple[bool, object]:
+) -> bool:
 
     # ── Pre-entry guards ──────────────────────────────────────────────
     if not risk_manager.can_trade():
-        return False, last_entry_bar_time
+        return False
  
     if position_manager.has_open_position(config.symbol, strategy.strategy_id):
-        return False, last_entry_bar_time
- 
-    if last_entry_bar_time == current_bar_time:
-        return False, last_entry_bar_time
+        return False
  
     # ── Signal generation ─────────────────────────────────────────────
     signal = strategy.generate_signal(
-        market_state=market_state,
-        history=history,
-        spread=spread,
+        snapshot,
+        spread,
     )
  
     if not signal:
-        return False, last_entry_bar_time
- 
+        return False 
+    
     direction_str = "BUY" if signal.direction.name == "LONG" else "SELL"
     direction_enum = Direction.LONG if signal.direction.name == "LONG" else Direction.SHORT
  
     log(f"[ENTRY] {signal.direction} at expected price: {signal.entry_price}", level="SIGNAL")
+
+    # ── Resolve setup-bar OHLC (history[-2] = the bar that triggered the setup) ──
+    history    = snapshot.history
+    setup_id = str(uuid.uuid4())
+    if history is not None:
+        setup_open  = history.open[-2]
+        setup_high  = history.high[-2]
+        setup_low   = history.low[-2]
+        setup_close = history.close[-2]
+        setup_timestamp   = datetime.fromtimestamp(history.time_unix[-2], tz=timezone.utc)
  
     # ── Build and log TradeSetup ──────────────────────────────────────
-    setup_id = str(uuid.uuid4())
-    execution_id = str(uuid.uuid4())
-    indicator_values = _get_indicator_values(strategy)
- 
-    setup = TradeSetup(
-        setup_id=setup_id,
-        strategy_id=strategy.strategy_id,
-        symbol=config.symbol,
-        timestamp=market_state.timestamp,
-        direction=direction_enum,
-        trigger_price=signal.entry_price,
-        bb_upper=indicator_values.get("bb_upper", 0.0),
-        bb_lower=indicator_values.get("bb_lower", 0.0),
-        bb_middle=indicator_values.get("bb_middle", 0.0),
-        bandwidth=indicator_values.get("bandwidth", 0.0),
-        bandwidth_ma=indicator_values.get("bandwidth_ma", 0.0),
-        atr=indicator_values.get("atr", 0.0),
-        spread=spread,
-        intended_entry_price=signal.entry_price,
-        intended_volume=config.base_volume,
-        hour_of_day=market_state.timestamp.hour,
-        candle_open=market_state.open,
-        candle_high=market_state.high,
-        candle_low=market_state.low,
-        candle_close=market_state.close,
-        prev_trade_pnl=None,
-        adaptive_filter_active=indicator_values.get("adaptive_filter_active", False),
-    )
-    datalogger.log_trade_setup(setup)
+        setup = TradeSetup(
+            setup_id                = setup_id,
+            strategy_id             = strategy.strategy_id,
+            symbol                  = config.symbol,
+            timestamp               = setup_timestamp,
+            direction               = direction_enum,
+            trigger_price           = signal.entry_price,
+            bb_upper                = _get_indicator_values(strategy).get("bb_upper", 0.0),
+            bb_lower                = _get_indicator_values(strategy).get("bb_lower", 0.0),
+            bb_middle               = _get_indicator_values(strategy).get("bb_middle", 0.0),
+            bandwidth               = _get_indicator_values(strategy).get("bandwidth", 0.0),
+            bandwidth_ma            = _get_indicator_values(strategy).get("bandwidth_ma", 0.0),
+            atr                     = _get_indicator_values(strategy).get("atr", 0.0),
+            spread                  = spread,
+            intended_entry_price    = signal.entry_price,
+            intended_volume         = config.base_volume,
+            hour_of_day             = setup_timestamp.hour,
+            candle_open             = setup_open,
+            candle_high             = setup_high,
+            candle_low              = setup_low,
+            candle_close            = setup_close,
+            prev_trade_pnl          = None,
+            adaptive_filter_active  = _get_indicator_values(strategy).get("adaptive_filter_active", False),
+        )
+        datalogger.log_trade_setup(setup)
  
     # ── Submit order ──────────────────────────────────────────────────
     result = bridge.send_order(
-        symbol=config.symbol,
-        direction=direction_str,
-        volume=config.base_volume,
-        magic=strategy.magic_number,
-        comment=strategy.strategy_id,
+        symbol      = config.symbol,
+        direction   = direction_str,
+        volume      = config.base_volume,
+        magic       = strategy.magic_number,
+        comment     = strategy.strategy_id,
     )
  
     if result is None:
         log("Order failed: no response from MT5", level="ERROR")
-        return False, last_entry_bar_time
+        return False
  
-    if result.retcode != mt5.TRADE_RETCODE_DONE:
+    if result.status != ExecutionStatus.DONE:
         log(
             f"Order failed: retcode={result.retcode}, "
             f"comment={getattr(result, 'comment', 'N/A')}",
             level="ERROR",
         )
-        return False, last_entry_bar_time
+        return False
  
     # ── Log execution and register position ───────────────────────────
     execution = TradeExecution(
-        execution_id=execution_id,
-        setup_id=setup_id,
-        filled_entry_price=result.price,
-        filled_volume=config.base_volume,
-        filled_time=market_state.timestamp,
-        slippage=abs(result.price - signal.entry_price),
-        latency_ms=0,
-        status="SUCCESS",
+        position_id         = result.position_id,
+        setup_id            = setup_id,
+        fill_price          = result.price,
+        fill_volume         = result.fill_volume,
+        fill_time           = result.fill_time,
+        slippage            = abs(result.price - signal.entry_price),
+        latency_ms          = result.latency_ms,
+        status              = result.status,
     )
     datalogger.log_trade_execution(execution)
  
     position_manager.track_entry_position(
-        position_ticket=result.order,
-        open_time=market_state.timestamp,
-        setup_id=setup_id,
-        execution_id=execution_id,
-        entry_slippage=execution.slippage,
-        entry_latency_ms=execution.latency_ms,
+        setup_id            = setup_id,
+        position_ticket     = result.order,
+        open_time           = execution.fill_time,
+        entry_slippage      = execution.slippage,
+        entry_latency_ms    = execution.latency_ms,
     )
- 
-    return True, current_bar_time
+    return True
  
  
 # ── Private helpers ───────────────────────────────────────────────────────────

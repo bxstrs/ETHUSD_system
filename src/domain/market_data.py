@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from datetime import datetime
-from domain.enums import Direction
 
 @dataclass(slots=True)
 class TickData:

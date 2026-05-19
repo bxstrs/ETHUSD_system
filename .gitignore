@@ -45,6 +45,7 @@ test-results/
 reports/
 notebooks/
 checkpoints/
+docs/
 
 # OS
 .DS_Store

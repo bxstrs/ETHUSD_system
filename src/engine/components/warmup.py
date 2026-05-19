@@ -1,14 +1,15 @@
 """src/engine/components/warmup.py"""
+from src.domain.market_data import History
 from src.infrastructure.logger.logger import log
  
  
-def warmup_strategy(strategy, history: dict) -> None:
+def warmup_strategy(strategy, history: History) -> None:
 
-    closes = history["close"]
-    highs = history["high"]
-    lows = history["low"]
-    opens = history["open"]
-    timestamps = history["timestamp"]
+    closes      = history.close
+    highs       = history.high
+    lows        = history.low
+    opens       = history.open
+    timestamps  = history.time_unix
  
     log(f"Warming up strategy with {len(closes)} bars...", level="INFO")
  

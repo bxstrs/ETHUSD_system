@@ -1,1 +1,0 @@
-# MT5 Package - Separated MT5 API concerns

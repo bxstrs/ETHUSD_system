@@ -1,23 +1,18 @@
-"""src/engine/marketstate_builder.py
-
-Handles all market data retrieval and construction of MarketState objects.
-Isolated here so the main loop stays free of data-plumbing details,
-and so these functions can be tested independently.
-"""
+"""src/engine/marketstate_builder.py"""
 import time
 from datetime import datetime, timezone
 
 from typing import Tuple
-from src.core.types import MarketState, TickData
-from src.core.exceptions import MarketDataUnavailable
-from src.engine.trading_config import TradingConfig
+from domain.market_data import TickData, History, MarketSnapshot
+from src.domain.exceptions import MarketDataUnavailable, TickFetchError
+from src.engine.components.trading_config import TradingConfig
 from src.infrastructure.logger.logger import log
 
 
-def fetch_data(
+def fetch_full_market_data(
     bridge,
     config: TradingConfig,
-) -> Tuple[dict, TickData]:
+) -> Tuple[History, TickData]:
 
     for attempt in range(config.max_fetch_attempts):
 
@@ -42,18 +37,52 @@ def fetch_data(
     )
 
 
-def build_market_state(
-    history: dict,
-    tick,
+def get_market_snapshot(
+    bridge,
+    config,
+    force_full: bool = False,
+) -> MarketSnapshot:
+
+    if force_full:
+        history, tick = fetch_full_market_data(bridge, config)
+        return MarketSnapshot(
+            tick            = tick,
+            history         = history,
+            is_full_refresh = True,
+        )
+    last_error = None
+
+    for attempt in range(1, config.max_fetch_attempts + 1):
+        try:
+            tick = bridge.get_tick(config.symbol)
+
+            return MarketSnapshot(
+                tick            = tick,
+                history         = None,
+                is_full_refresh = False,
+            )
+        except TickFetchError as exc:
+            last_error = exc
+            log(f"Tick fetch failed ({attempt}/{config.max_fetch_attempts}): {exc}",level="WARNING",)
+
+            if attempt < config.max_fetch_attempts:
+                time.sleep(0.25)
+
+    raise MarketDataUnavailable (f"Unable to fetch market tick aftern {config.max_fetch_attempts} attempts") from last_error
+
+'''
+def build_snapshot(
+    history: History,
+    tick: TickData,
     config: TradingConfig,
     use_previous: bool = False,
-) -> MarketState:
+) -> MarketSnapshot:
 
     idx = -2 if use_previous else -1
 
-    if not history or not history.get("timestamp") or len(history["timestamp"]) < abs(idx):
+    if not history or not history.time_unix or len(history.time_unix) < abs(idx):
         raise ValueError(
-            f"Insufficient history: got {len(history.get('timestamp', []))} bars, "
+            f"Insufficient history: got {len(history.time_unix)} bars, "
             f"need at least {abs(idx)}"
         )
 
@@ -64,13 +93,15 @@ def build_market_state(
         )
 
     return MarketState(
-        symbol=config.symbol,
-        interval=config.timeframe,
-        timestamp=datetime.fromtimestamp(history["timestamp"][idx], tz=timezone.utc),
-        open=history["open"][idx],
-        high=history["high"][idx],
-        low=history["low"][idx],
-        close=history["close"][idx],
-        bid=tick.bid,
-        ask=tick.ask,
+        symbol      = config.symbol,
+        interval    = config.timeframe,
+        timestamp   = datetime.fromtimestamp(history["timestamp"][idx], tz=timezone.utc),
+        open        = history["open"][idx],
+        high        = history["high"][idx],
+        low         = history["low"][idx],
+        close       = history["close"][idx],
+        bid         = tick.bid,
+        ask         = tick.ask,
+        volume      = tick.volume,
     )
+'''

@@ -1,36 +1,36 @@
 '''src/indicators/incremental/volatility_live.py'''
 import math
 from collections import deque
-from typing import Tuple, Optional
+from typing import Tuple
 
 from src.indicators.base import Indicator
 
 class IncrementalVolatility(Indicator):
     
     def __init__(self, bb_period: int, bb_dev: float, atr_period: int):
-        self.bb_period = bb_period
-        self.bb_dev = bb_dev
+        self.bb_period  = bb_period
+        self.bb_dev     = bb_dev
         self.atr_period = atr_period
         
         # Rolling windows
-        self.closes = deque(maxlen=bb_period)
-        self.tr_values = deque(maxlen=atr_period)
+        self.closes     = deque(maxlen=bb_period)
+        self.tr_values  = deque(maxlen=atr_period)
 
         # Running sums for BB and ATR
-        self._sum = 0.0
-        self._sum_sq = 0.0
-        self._tr_sum = 0.0
+        self._sum       = 0.0
+        self._sum_sq    = 0.0
+        self._tr_sum    = 0.0
         
         # Cached results
-        self._bb_upper: Optional[float] = None
-        self._bb_lower: Optional[float] = None
-        self._bb_middle: Optional[float] = None
-        self._atr: float = 0.0
+        self._bb_upper:     float | None = None
+        self._bb_lower:     float | None = None
+        self._bb_middle:    float | None = None
+        self._atr:          float = 0.0
 
         # Previous values for signal generation
-        self._prev_bb_upper: Optional[float] = None
-        self._prev_bb_lower: Optional[float] = None
-        self._prev_bb_middle: Optional[float] = None
+        self._prev_bb_upper:    float | None = None
+        self._prev_bb_lower:    float | None = None
+        self._prev_bb_middle:   float | None = None
         
         
     def update(
@@ -40,10 +40,7 @@ class IncrementalVolatility(Indicator):
         low: float,
         prev_close: float
     ) -> None:
-        """
-        Update with new tick data.
-            prev_close (required for True Range calculation on first update)
-        """
+
         # ===== BOLLINGER UPDATE =====
         if len(self.closes) == self.bb_period:
             old = self.closes.popleft()
@@ -75,25 +72,25 @@ class IncrementalVolatility(Indicator):
         """Recalculate BB and ATR using running sums."""
 
         # ---- SHIFT CURRENT → PREVIOUS ----
-        self._prev_bb_upper = self._bb_upper
-        self._prev_bb_lower = self._bb_lower
-        self._prev_bb_middle = self._bb_middle
+        self._prev_bb_upper     = self._bb_upper
+        self._prev_bb_lower     = self._bb_lower
+        self._prev_bb_middle    = self._bb_middle
 
         # ---- Bollinger Bands (CURRENT) ----
         n = len(self.closes)
         if n < self.bb_period:
-            self._bb_upper = None
-            self._bb_lower = None
+            self._bb_upper  = None
+            self._bb_lower  = None
             self._bb_middle = None
         else:
-            mean = self._sum / n
-            variance = (self._sum_sq / n) - (mean * mean)
-            variance = max(variance, 0.0)
-            std = math.sqrt(variance)
+            mean        = self._sum / n
+            variance    = (self._sum_sq / n) - (mean * mean)
+            variance    = max(variance, 0.0)
+            std         = math.sqrt(variance)
 
             self._bb_middle = mean
-            self._bb_upper = mean + self.bb_dev * std
-            self._bb_lower = mean - self.bb_dev * std
+            self._bb_upper  = mean + self.bb_dev * std
+            self._bb_lower  = mean - self.bb_dev * std
 
         # ---- ATR ----
         m = len(self.tr_values)
@@ -101,10 +98,10 @@ class IncrementalVolatility(Indicator):
     
      # ===== GETTERS =====
     
-    def get_bollinger_bands(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    def get_bollinger_bands(self) -> Tuple[float | None, float | None, float | None]:
         return self._bb_upper, self._bb_lower, self._bb_middle
 
-    def get_previous_bollinger_bands(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    def get_previous_bollinger_bands(self) -> Tuple[float | None, float | None, float | None]:
         return self._prev_bb_upper, self._prev_bb_lower, self._prev_bb_middle
 
     def get_atr(self) -> float:
@@ -125,9 +122,9 @@ class IncrementalVolatility(Indicator):
 
 class BandwidthMACalculator(Indicator):
     def __init__(self, bw_ma_period: int = 150):
-        self.bw_ma_period = bw_ma_period
-        self.values = deque(maxlen=bw_ma_period)
-        self._sum = 0.0
+        self.bw_ma_period   = bw_ma_period
+        self.values         = deque(maxlen=bw_ma_period)
+        self._sum           = 0.0
 
     def update(self, value: float) -> None:
         if len(self.values) == self.bw_ma_period:

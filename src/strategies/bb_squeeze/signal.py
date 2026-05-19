@@ -1,13 +1,11 @@
 '''src/strategies/bb_squeeze/signal.py'''
-from typing import Optional
- 
-from src.domain.market_data import MarketSnapshot, History
-from src.domain.trading import Signal
-from src.domain.enums import Direction
-from src.strategies.bb_squeeze.config import BBSqueezeConfig
-from src.strategies.base import Strategy
-from src.indicators.volatility import IncrementalVolatility, BandwidthMACalculator
-from src.infrastructure.logger.logger import log
+from src.domain.market_data             import MarketSnapshot, History
+from src.domain.trading                 import Signal
+from src.domain.enums                   import Direction
+from src.strategies.bb_squeeze.config   import BBSqueezeConfig
+from src.strategies.base                import Strategy
+from src.indicators.volatility          import IncrementalVolatility, BandwidthMACalculator
+from src.infrastructure.logger.logger   import log
  
  
 class BBSqueeze(Strategy):
@@ -63,7 +61,7 @@ class BBSqueeze(Strategy):
         self,
         snapshot: MarketSnapshot,
         spread: float,
-    ) -> Optional[Signal]:
+    ) -> Signal | None:
 
         history = snapshot.history
         tick    = snapshot.tick
